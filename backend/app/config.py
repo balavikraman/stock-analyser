@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     validation_benchmark_symbol: str = "^NSEI"
     validation_round_trip_cost_pct: float = 0.25
     validation_update_limit: int = 100
+    validation_timezone: str = "Asia/Kolkata"
+    validation_run_timeout_minutes: int = 120
 
     default_symbol: str = "INFY.NS"
     watchlist: str = "INFY.NS,TCS.NS,HCLTECH.NS,POWERGRID.NS,NTPC.NS,ITC.NS"

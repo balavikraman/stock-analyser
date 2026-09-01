@@ -29,13 +29,13 @@ from .services.validation import (
     outcome_payload,
     prediction_payload,
     record_analysis_predictions,
-    update_prediction_outcomes,
     validation_metrics as calculate_validation_metrics,
     walk_forward_plan,
 )
+from .services.validation_runner import execute_validation_run, validation_runner_status
 
 settings = get_settings()
-app = FastAPI(title="Stock Analyzer", version="0.6.0", docs_url="/api/docs")
+app = FastAPI(title="Stock Analyzer", version="0.6.1", docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -60,7 +60,7 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.6.0", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured(), "prospective_validation": True}
+    return {"status": "ok", "version": "0.6.1", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured(), "prospective_validation": True, "validation_runner": True}
 
 
 @app.get("/api/analyze/{symbol}")
@@ -165,9 +165,20 @@ def prediction_outcomes(prediction_id: int, db: Session = Depends(db_session)):
 
 
 @app.post("/api/validation/update-outcomes")
-def validation_update(limit: int = 100, db: Session = Depends(db_session)):
-    """Mature pending outcomes using only market sessions available today."""
-    return update_prediction_outcomes(db, limit=limit)
+def validation_update(limit: int = 100, force: bool = False, db: Session = Depends(db_session)):
+    """Mature pending outcomes with one idempotent run per India market day."""
+    return execute_validation_run(db, limit=limit, force=force, triggered_by="api")
+
+
+@app.post("/api/validation/run")
+def validation_run(limit: int = 100, force: bool = False, db: Session = Depends(db_session)):
+    """Explicit alias for the scheduler-safe outcome maturation job."""
+    return execute_validation_run(db, limit=limit, force=force, triggered_by="api")
+
+
+@app.get("/api/validation/status")
+def validation_status(db: Session = Depends(db_session)):
+    return validation_runner_status(db)
 
 
 @app.get("/api/validation/metrics")
