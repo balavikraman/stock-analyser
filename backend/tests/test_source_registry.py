@@ -26,3 +26,4 @@ def test_active_only_hides_planned_adapters():
     payload = registry_payload("telecom", include_planned=False)
     assert all(row["adapter_status"] == "active" for row in payload["sources"])
     assert "bse_public" in {row["key"] for row in payload["sources"]}
+    assert "sebi_filings" in {row["key"] for row in payload["sources"]}

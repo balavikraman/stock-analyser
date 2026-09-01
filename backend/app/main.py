@@ -22,10 +22,11 @@ from .services.filing_store import persist_filing_bundle, recent_filings
 from .services.official_evidence import fetch_official_evidence, official_evidence_summary
 from .services.official_facts import extract_structured_facts
 from .services.official_validation import assess_official_bundle
+from .services.sebi_public import discover_sebi_documents
 from .services.source_registry import registry_payload
 
 settings = get_settings()
-app = FastAPI(title="Stock Analyzer", version="0.5.3", docs_url="/api/docs")
+app = FastAPI(title="Stock Analyzer", version="0.5.4", docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -50,7 +51,7 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.5.3", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
+    return {"status": "ok", "version": "0.5.4", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
 
 
 @app.get("/api/analyze/{symbol}")
@@ -90,6 +91,12 @@ def company_ir(symbol: str):
 def bse_filings(scrip_code: str):
     """Discover public BSE filing links for one six-digit BSE scrip code."""
     return discover_bse_filings(scrip_code)
+
+
+@app.get("/api/sebi-documents")
+def sebi_documents(query: str):
+    """Search the latest public SEBI listing pages for an entity or company name."""
+    return discover_sebi_documents(query)
 
 
 @app.get("/api/official-filings/{symbol}")

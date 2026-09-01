@@ -71,6 +71,7 @@ A valid historical fundamental backtest needs **point-in-time financial data** t
 - `GET /api/sources`
 - `GET /api/company-ir/{symbol}`
 - `GET /api/bse-filings/{scrip_code}` (six-digit BSE code; public-page discovery only)
+- `GET /api/sebi-documents?query={company_or_entity}` (bounded latest-listing search)
 - `GET /api/official-filings/{symbol}`
 - `GET /api/official-xbrl/{symbol}`
 - `GET /api/official-verify/{symbol}`
