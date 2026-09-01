@@ -91,14 +91,24 @@ def summarize_evidence(evidence: dict[str, dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def actionable_gate(*, live_data: bool, overall_confidence: float, evidence_summary: dict[str, Any], strict_mode: bool) -> dict[str, Any]:
+def actionable_gate(
+    *,
+    live_data: bool,
+    overall_confidence: float,
+    evidence_summary: dict[str, Any],
+    strict_mode: bool,
+    min_confidence: float = 0.60,
+) -> dict[str, Any]:
     reasons: list[str] = []
-    if strict_mode and not live_data:
-        reasons.append("strict mode blocks demo/fallback data")
-    if overall_confidence < 0.60:
-        reasons.append("overall evidence confidence is below 60%")
+    threshold = max(0.0, min(1.0, float(min_confidence)))
+    if not live_data:
+        reasons.append("demo/fallback data is never actionable")
+    if overall_confidence < threshold:
+        reasons.append(f"overall evidence confidence is below {round(threshold * 100)}%")
     if evidence_summary.get("evidence_items", 0) and evidence_summary.get("evidence_confidence", 0) < 0.55:
         reasons.append("source-level evidence confidence is below 55%")
     if evidence_summary.get("stale_items", 0) > 0:
         reasons.append("one or more critical evidence items are stale")
+    if strict_mode and evidence_summary.get("verified_items", 0) < max(1, evidence_summary.get("evidence_items", 0) // 2):
+        reasons.append("strict mode requires a majority of evidence items to have non-demo source provenance")
     return {"actionable": not reasons, "reasons": reasons}

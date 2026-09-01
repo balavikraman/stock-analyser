@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = ""
     data_provider: str = "auto"
+    strict_analysis_mode: bool = False
+    min_actionable_confidence: float = 0.60
     default_symbol: str = "INFY.NS"
     watchlist: str = "INFY.NS,TCS.NS,HCLTECH.NS,POWERGRID.NS,NTPC.NS,ITC.NS"
 
@@ -34,6 +36,10 @@ class Settings(BaseSettings):
         runtime = ROOT / ".runtime"
         runtime.mkdir(exist_ok=True)
         return f"sqlite:///{runtime / 'stock_analyzer.db'}"
+
+    @property
+    def production_like(self) -> bool:
+        return self.app_env.lower() in {"production", "prod"} or self.strict_analysis_mode
 
 
 @lru_cache
