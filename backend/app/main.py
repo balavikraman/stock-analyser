@@ -15,9 +15,10 @@ from .portfolio import summarize_holdings
 from .providers.zerodha_provider import ZerodhaReadOnly
 from .schemas import JournalCreate
 from .services.analyzer import StockAnalyzer
+from .services.official_evidence import fetch_official_evidence, official_evidence_summary
 
 settings = get_settings()
-app = FastAPI(title="Stock Analyzer", version="0.3.0", docs_url="/api/docs")
+app = FastAPI(title="Stock Analyzer", version="0.5.0", docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -42,7 +43,15 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.3.0", "provider": settings.data_provider, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
+    return {
+        "status": "ok",
+        "version": "0.5.0",
+        "provider": settings.data_provider,
+        "official_evidence_enabled": settings.official_evidence_enabled,
+        "require_official_evidence": settings.require_official_evidence,
+        "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback",
+        "zerodha_configured": ZerodhaReadOnly().configured(),
+    }
 
 
 @app.get("/api/analyze/{symbol}")
@@ -55,6 +64,17 @@ def analyze(symbol: str, db: Session = Depends(db_session)):
     db.add(snap); db.commit(); db.refresh(snap)
     payload = report.model_dump(mode="json"); payload["snapshot_id"] = snap.id
     return payload
+
+
+@app.get("/api/official-filings/{symbol}")
+def official_filings(symbol: str, force: bool = False):
+    """Return official NSE filing metadata separately from normalized market data.
+
+    This endpoint is intentionally transparent: provider/parser errors are returned to the
+    caller so an unavailable endpoint cannot be mistaken for absence of company filings.
+    """
+    bundle = fetch_official_evidence(symbol, force=force)
+    return {"summary": official_evidence_summary(bundle), "evidence": bundle.get("evidence", {}), "errors": bundle.get("errors", [])}
 
 
 @app.get("/api/scan")
