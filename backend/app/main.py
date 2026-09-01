@@ -20,6 +20,7 @@ from .services.filing_store import persist_filing_bundle, recent_filings
 from .services.official_evidence import fetch_official_evidence, official_evidence_summary
 from .services.official_facts import extract_structured_facts
 from .services.official_validation import assess_official_bundle
+from .services.source_registry import registry_payload
 
 settings = get_settings()
 app = FastAPI(title="Stock Analyzer", version="0.5.0", docs_url="/api/docs")
@@ -60,6 +61,12 @@ def analyze(symbol: str, db: Session = Depends(db_session)):
     db.add(snap); db.commit(); db.refresh(snap)
     payload = report.model_dump(mode="json"); payload["snapshot_id"] = snap.id
     return payload
+
+
+@app.get("/api/sources")
+def sources(sector: str | None = None, include_planned: bool = True):
+    """Show the free/public source strategy and adapter readiness by sector."""
+    return registry_payload(sector, include_planned=include_planned)
 
 
 @app.get("/api/official-filings/{symbol}")
