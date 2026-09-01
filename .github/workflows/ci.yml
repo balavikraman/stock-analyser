@@ -15,8 +15,9 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt
       - name: Run tests
         env:
           DATA_PROVIDER: demo
-        run: pytest -q backend/tests
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest -q backend/tests
