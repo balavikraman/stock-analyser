@@ -12,5 +12,8 @@ def test_demo_report_complete():
     assert report.overall_score is not None
     assert report.overall_confidence > 0.5
     assert len(report.annuals) >= 5
-    assert "first_entry" in report.entry_plan
+    assert report.entry_plan["actionable"] is False
+    assert report.entry_plan["status"] == "BLOCKED — EVIDENCE REVIEW REQUIRED"
+    assert "first_entry" not in report.entry_plan
+    assert "demo/fallback data is never actionable" in report.entry_plan["block_reasons"]
     assert report.data_quality["live_data"] is False

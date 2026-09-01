@@ -100,10 +100,12 @@ class StockAnalyzer:
         if not gate["actionable"]:
             verdict = "RESEARCH ONLY / NOT ACTIONABLE"
             summary = "Do not commit capital from this report yet. " + "; ".join(gate["reasons"])
-            entry = dict(entry)
-            entry["status"] = "BLOCKED — EVIDENCE REVIEW REQUIRED"
-            entry["actionable"] = False
-            entry["block_reasons"] = gate["reasons"]
+            entry = {
+                "status": "BLOCKED — EVIDENCE REVIEW REQUIRED",
+                "actionable": False,
+                "block_reasons": gate["reasons"],
+                "reason": "Entry and position-sizing ranges are withheld until the evidence gate is actionable.",
+            }
         else:
             entry = dict(entry)
             entry["actionable"] = True
