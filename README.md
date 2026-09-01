@@ -64,6 +64,25 @@ Each component is multiplied by its evidence confidence. Missing data reduces in
 
 A valid historical fundamental backtest needs **point-in-time financial data** to avoid look-ahead bias. This project will not claim a valid backtest using today's revised fundamentals. It stores every analysis snapshot and investment thesis so future 1/3/6/12-month outcomes can be measured honestly.
 
+## Daily validation runner (Windows)
+
+The runner matures eligible prediction outcomes using only market sessions that exist at run time. It records each attempt in the database, avoids a second successful run on the same India market date, and makes failed attempts retryable.
+
+Run it manually from the project folder:
+
+```bat
+scripts\run_validation.cmd
+```
+
+For automatic operation, create a **Windows Task Scheduler** task:
+
+- Trigger: Monday–Friday at 6:30 PM, after the Indian market close.
+- Action: start `scripts\run_validation.cmd`.
+- Start in: the project folder.
+- Set “Do not start a new instance” if one is already running.
+
+Use `GET /api/validation/status` to review the latest attempt. `success` means all requested price histories were available; `partial` preserves completed work but records provider errors; `failed` is safe to run again. The runner never places orders and uses the existing configured free data provider.
+
 ## API
 
 - `GET /api/health`
@@ -78,6 +97,8 @@ A valid historical fundamental backtest needs **point-in-time financial data** t
 - `GET /api/predictions` (frozen long-term and swing baseline records)
 - `GET /api/predictions/{prediction_id}/outcomes`
 - `POST /api/validation/update-outcomes`
+- `POST /api/validation/run` (scheduler-safe manual trigger)
+- `GET /api/validation/status` (recent runs and failure visibility)
 - `GET /api/validation/metrics`
 - `GET /api/validation/walk-forward?strategy={long_term|swing}&horizon_days={5|10|20|63|126|252}`
 - `GET /api/scan`

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -107,3 +107,26 @@ class PredictionOutcome(Base):
     max_adverse_excursion_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ValidationRun(Base):
+    """One idempotent daily attempt to mature prospective prediction outcomes."""
+
+    __tablename__ = "validation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_key: Mapped[str] = mapped_column(String(96), unique=True, index=True)
+    run_date: Mapped[date] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="running", index=True)
+    triggered_by: Mapped[str] = mapped_column(String(32), default="api")
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    requested_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    predictions_checked: Mapped[int] = mapped_column(Integer, default=0)
+    outcomes_created: Mapped[int] = mapped_column(Integer, default=0)
+    outcomes_updated: Mapped[int] = mapped_column(Integer, default=0)
+    outcomes_complete: Mapped[int] = mapped_column(Integer, default=0)
+    outcomes_pending: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[list] = mapped_column(JSON, default=list)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
