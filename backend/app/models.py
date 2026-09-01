@@ -1,18 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
+
+
+def utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class AnalysisSnapshot(Base):
     __tablename__ = "analysis_snapshots"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     symbol: Mapped[str] = mapped_column(String(32), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, index=True)
     overall_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     verdict: Mapped[str] = mapped_column(String(64), default="INSUFFICIENT DATA")
@@ -29,7 +33,7 @@ class FilingSnapshot(Base):
     filing_type: Mapped[str] = mapped_column(String(64), index=True)
     source_key: Mapped[str] = mapped_column(String(255))
     observed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, index=True)
     period: Mapped[str | None] = mapped_column(String(64), nullable=True)
     document_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
@@ -38,7 +42,7 @@ class FilingSnapshot(Base):
 class JournalEntry(Base):
     __tablename__ = "journal_entries"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, index=True)
     symbol: Mapped[str] = mapped_column(String(32), index=True)
     action: Mapped[str] = mapped_column(String(32))
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -54,4 +58,52 @@ class WatchlistItem(Base):
     symbol: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     note: Mapped[str] = mapped_column(Text, default="")
     target_entry: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+
+
+class PredictionRecord(Base):
+    __tablename__ = "prediction_records"
+    __table_args__ = (UniqueConstraint("snapshot_id", "strategy", "model_version", name="uq_prediction_snapshot_strategy_model"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    strategy: Mapped[str] = mapped_column(String(32), index=True)
+    model_version: Mapped[str] = mapped_column(String(64), index=True)
+    model_frozen: Mapped[bool] = mapped_column(Boolean, default=True)
+    signal: Mapped[str] = mapped_column(String(64), index=True)
+    actionable: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    validation_eligible: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    entry_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    benchmark_symbol: Mapped[str] = mapped_column(String(32), default="^NSEI")
+    data_quality_confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    model_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
+    decision_confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    horizon_spec: Mapped[dict] = mapped_column(JSON)
+    snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_snapshots.id"), nullable=True, index=True)
+    input_snapshot: Mapped[dict] = mapped_column(JSON)
+
+
+class PredictionOutcome(Base):
+    __tablename__ = "prediction_outcomes"
+    __table_args__ = (UniqueConstraint("prediction_id", "horizon_days", name="uq_prediction_outcome_horizon"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    prediction_id: Mapped[int] = mapped_column(ForeignKey("prediction_records.id", ondelete="CASCADE"), index=True)
+    horizon_label: Mapped[str] = mapped_column(String(16))
+    horizon_days: Mapped[int] = mapped_column(Integer, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    evaluated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    start_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    start_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gross_return_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    estimated_cost_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    net_return_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    benchmark_return_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    excess_return_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_favorable_excursion_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_adverse_excursion_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
