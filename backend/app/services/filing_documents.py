@@ -9,7 +9,7 @@ from .official_facts import document_url
 from .xbrl_parser import parse_xbrl_bytes
 
 
-ALLOWED_HOSTS = {"nseindia.com", "www.nseindia.com", "archives.nseindia.com"}
+ALLOWED_HOSTS = {"nseindia.com", "www.nseindia.com", "archives.nseindia.com", "nsearchives.nseindia.com"}
 MAX_DOWNLOAD_BYTES = 25_000_000
 
 
