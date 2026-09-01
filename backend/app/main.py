@@ -15,6 +15,7 @@ from .portfolio import summarize_holdings
 from .providers.zerodha_provider import ZerodhaReadOnly
 from .schemas import JournalCreate
 from .services.analyzer import StockAnalyzer
+from .services.company_ir import discover_ir_documents
 from .services.filing_documents import parse_latest_official_documents
 from .services.filing_store import persist_filing_bundle, recent_filings
 from .services.official_evidence import fetch_official_evidence, official_evidence_summary
@@ -23,7 +24,7 @@ from .services.official_validation import assess_official_bundle
 from .services.source_registry import registry_payload
 
 settings = get_settings()
-app = FastAPI(title="Stock Analyzer", version="0.5.1", docs_url="/api/docs")
+app = FastAPI(title="Stock Analyzer", version="0.5.2", docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -48,7 +49,7 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.5.1", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
+    return {"status": "ok", "version": "0.5.2", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
 
 
 @app.get("/api/analyze/{symbol}")
@@ -66,6 +67,22 @@ def analyze(symbol: str, db: Session = Depends(db_session)):
 @app.get("/api/sources")
 def sources(sector: str | None = None, include_planned: bool = True):
     return registry_payload(sector, include_planned=include_planned)
+
+
+@app.get("/api/company-ir/{symbol}")
+def company_ir(symbol: str):
+    """Discover issuer-hosted public investor-relations documents for one company."""
+    try:
+        metrics = StockAnalyzer()._provider().company_snapshot(symbol.strip().upper())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Company metadata provider failed: {type(exc).__name__}: {exc}") from exc
+    website = metrics.get("website")
+    if not website:
+        return {"ok": False, "symbol": symbol.strip().upper(), "company_name": metrics.get("company_name"), "website": None, "documents": [], "pages_scanned": [], "errors": ["issuer website unavailable from normalized provider"]}
+    result = discover_ir_documents(str(website))
+    result["symbol"] = symbol.strip().upper()
+    result["company_name"] = metrics.get("company_name")
+    return result
 
 
 @app.get("/api/official-filings/{symbol}")
