@@ -15,7 +15,9 @@ from .portfolio import summarize_holdings
 from .providers.zerodha_provider import ZerodhaReadOnly
 from .schemas import JournalCreate
 from .services.analyzer import StockAnalyzer
+from .services.filing_store import persist_filing_bundle, recent_filings
 from .services.official_evidence import fetch_official_evidence, official_evidence_summary
+from .services.official_facts import extract_structured_facts
 
 settings = get_settings()
 app = FastAPI(title="Stock Analyzer", version="0.5.0", docs_url="/api/docs")
@@ -43,15 +45,7 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {
-        "status": "ok",
-        "version": "0.5.0",
-        "provider": settings.data_provider,
-        "official_evidence_enabled": settings.official_evidence_enabled,
-        "require_official_evidence": settings.require_official_evidence,
-        "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback",
-        "zerodha_configured": ZerodhaReadOnly().configured(),
-    }
+    return {"status": "ok", "version": "0.5.0", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
 
 
 @app.get("/api/analyze/{symbol}")
@@ -67,14 +61,18 @@ def analyze(symbol: str, db: Session = Depends(db_session)):
 
 
 @app.get("/api/official-filings/{symbol}")
-def official_filings(symbol: str, force: bool = False):
-    """Return official NSE filing metadata separately from normalized market data.
-
-    This endpoint is intentionally transparent: provider/parser errors are returned to the
-    caller so an unavailable endpoint cannot be mistaken for absence of company filings.
-    """
+def official_filings(symbol: str, force: bool = False, persist: bool = True, db: Session = Depends(db_session)):
+    """Fetch transparent NSE evidence, optionally persist raw filing metadata locally."""
     bundle = fetch_official_evidence(symbol, force=force)
-    return {"summary": official_evidence_summary(bundle), "evidence": bundle.get("evidence", {}), "errors": bundle.get("errors", [])}
+    stored = persist_filing_bundle(db, bundle) if persist else {"created": 0, "existing": 0}
+    facts = extract_structured_facts((bundle.get("financial_results") or []) + (bundle.get("shareholding") or []))
+    return {"summary": official_evidence_summary(bundle), "facts": facts, "evidence": bundle.get("evidence", {}), "errors": bundle.get("errors", []), "storage": stored}
+
+
+@app.get("/api/filing-history/{symbol}")
+def filing_history(symbol: str, limit: int = 100, db: Session = Depends(db_session)):
+    rows = recent_filings(db, symbol, limit)
+    return [{"id": r.id, "symbol": r.symbol, "source": r.source, "filing_type": r.filing_type, "source_key": r.source_key, "observed_at": r.observed_at.isoformat() if r.observed_at else None, "fetched_at": r.fetched_at.isoformat(), "period": r.period, "document_url": r.document_url} for r in rows]
 
 
 @app.get("/api/scan")
