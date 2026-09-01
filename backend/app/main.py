@@ -20,9 +20,10 @@ from .services.filing_store import persist_filing_bundle, recent_filings
 from .services.official_evidence import fetch_official_evidence, official_evidence_summary
 from .services.official_facts import extract_structured_facts
 from .services.official_validation import assess_official_bundle
+from .services.source_registry import registry_payload
 
 settings = get_settings()
-app = FastAPI(title="Stock Analyzer", version="0.5.0", docs_url="/api/docs")
+app = FastAPI(title="Stock Analyzer", version="0.5.1", docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -47,7 +48,7 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.5.0", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
+    return {"status": "ok", "version": "0.5.1", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
 
 
 @app.get("/api/analyze/{symbol}")
@@ -62,9 +63,13 @@ def analyze(symbol: str, db: Session = Depends(db_session)):
     return payload
 
 
+@app.get("/api/sources")
+def sources(sector: str | None = None, include_planned: bool = True):
+    return registry_payload(sector, include_planned=include_planned)
+
+
 @app.get("/api/official-filings/{symbol}")
 def official_filings(symbol: str, force: bool = False, persist: bool = True, db: Session = Depends(db_session)):
-    """Fetch transparent NSE filing metadata without automatically downloading documents."""
     bundle = fetch_official_evidence(symbol, force=force)
     stored = persist_filing_bundle(db, bundle) if persist else {"created": 0, "existing": 0}
     facts = extract_structured_facts((bundle.get("financial_results") or []) + (bundle.get("shareholding") or []))
@@ -73,7 +78,6 @@ def official_filings(symbol: str, force: bool = False, persist: bool = True, db:
 
 @app.get("/api/official-xbrl/{symbol}")
 def official_xbrl(symbol: str, force: bool = False, db: Session = Depends(db_session)):
-    """Opt-in download/parse of the latest trusted NSE financial/shareholding documents."""
     bundle = fetch_official_evidence(symbol, force=force)
     persist_filing_bundle(db, bundle)
     parsed = parse_latest_official_documents(bundle)
@@ -82,7 +86,6 @@ def official_xbrl(symbol: str, force: bool = False, db: Session = Depends(db_ses
 
 @app.get("/api/official-verify/{symbol}")
 def official_verify(symbol: str, force: bool = False):
-    """Compare explicit official metadata facts with the normalized provider snapshot."""
     try:
         metrics = StockAnalyzer()._provider().company_snapshot(symbol.strip().upper())
     except Exception as exc:
