@@ -12,6 +12,8 @@ from ..technical import analyze_technicals
 from ..valuation import build_entry_plan, build_scenarios
 from .financials import enrich_quarterlies, forensic_checks
 from .news import classify_news, research_score
+from .official_evidence import fetch_official_evidence
+from .official_validation import assess_official_bundle, official_action_blocks
 
 
 class StockAnalyzer:
@@ -53,6 +55,20 @@ class StockAnalyzer:
         if metrics.get("market_cap") and metrics.get("fcf"):
             metrics["fcf_yield"] = round(float(metrics["fcf"]) / float(metrics["market_cap"]) * 100, 2)
 
+        official_bundle: dict[str, Any] | None = None
+        official_assessment: dict[str, Any] = {
+            "summary": {"available": False, "errors": []},
+            "facts": {},
+            "mismatches": [],
+            "high_mismatch_count": 0,
+            "medium_mismatch_count": 0,
+            "verified": False,
+        }
+        if provider.name != "demo" and self.settings.official_evidence_enabled:
+            official_bundle = fetch_official_evidence(symbol)
+            official_assessment = assess_official_bundle(official_bundle, metrics)
+            source_errors.extend([f"Official evidence: {error}" for error in official_bundle.get("errors", [])])
+
         forensic = forensic_checks(annuals, metrics)
         technical = analyze_technicals(history)
         fundamental = fundamental_score(metrics, annuals, metrics.get("sector"))
@@ -66,6 +82,8 @@ class StockAnalyzer:
         entry = build_entry_plan(metrics.get("price"), technical, scenarios, combined["confidence"])
 
         evidence = self._build_evidence(provider.name, metrics, history, annuals, quarterlies, classified_news)
+        if official_bundle:
+            evidence.update(official_bundle.get("evidence") or {})
         evidence_summary = summarize_evidence(evidence)
         gate = actionable_gate(
             live_data=provider.name != "demo",
@@ -74,6 +92,9 @@ class StockAnalyzer:
             strict_mode=self.settings.production_like,
             min_confidence=self.settings.min_actionable_confidence,
         )
+        official_blocks = official_action_blocks(official_assessment, required=self.settings.require_official_evidence and provider.name != "demo")
+        if official_blocks:
+            gate = {"actionable": False, "reasons": list(dict.fromkeys(list(gate["reasons"]) + official_blocks))}
 
         verdict, summary = self._verdict(combined["score"], combined["confidence"], valuation.get("score"), technical.get("score"))
         if not gate["actionable"]:
@@ -94,7 +115,10 @@ class StockAnalyzer:
             "governance": ScoreComponent(score=governance.get("score"), confidence=governance.get("confidence", 0), label="Governance", explanation="Missing governance evidence lowers confidence instead of being guessed."),
             "research": ScoreComponent(score=research.get("score"), confidence=research.get("confidence", 0), label="Current news & external context", explanation=research.get("explanation", "")),
         }
-        risks = self._risks(metrics, technical, classified_news, source_errors) + [f["message"] for f in forensic["flags"] if f["severity"] in ("high", "medium")]
+        mismatch_risks = [item.get("message") for item in official_assessment.get("mismatches", []) if item.get("message")]
+        risks = self._risks(metrics, technical, classified_news, source_errors) + mismatch_risks + [f["message"] for f in forensic["flags"] if f["severity"] in ("high", "medium")]
+        risks = list(dict.fromkeys(risks))[:10]
+
         return AnalysisReport(
             symbol=symbol,
             company_name=metrics.get("company_name") or symbol,
@@ -130,13 +154,15 @@ class StockAnalyzer:
                 "forensic_flags": forensic["flags"],
                 "evidence": evidence,
                 "evidence_summary": evidence_summary,
+                "official_validation": official_assessment,
+                "official_evidence_required": self.settings.require_official_evidence,
                 "actionable": gate["actionable"],
                 "action_block_reasons": gate["reasons"],
                 "strict_mode": self.settings.production_like,
             },
             disclaimers=[
                 "Decision-support tool, not a profit guarantee or personalized regulated investment advice.",
-                "Low-confidence, stale, demo or missing evidence blocks an actionable verdict.",
+                "Low-confidence, stale, demo, missing or materially conflicting official evidence blocks an actionable verdict.",
                 "Entry zones are risk-management ranges, not predictions of exact bottoms or tops.",
             ],
         )

@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     data_provider: str = "auto"
     strict_analysis_mode: bool = False
     min_actionable_confidence: float = 0.60
+
+    # V0.5 official evidence layer. This enriches the normalized market-data
+    # provider with exchange/company filings; it does not silently invent data.
+    official_evidence_enabled: bool = True
+    require_official_evidence: bool = False
+    official_evidence_cache_minutes: int = 20
+
     default_symbol: str = "INFY.NS"
     watchlist: str = "INFY.NS,TCS.NS,HCLTECH.NS,POWERGRID.NS,NTPC.NS,ITC.NS"
 

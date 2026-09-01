@@ -15,9 +15,14 @@ from .portfolio import summarize_holdings
 from .providers.zerodha_provider import ZerodhaReadOnly
 from .schemas import JournalCreate
 from .services.analyzer import StockAnalyzer
+from .services.filing_documents import parse_latest_official_documents
+from .services.filing_store import persist_filing_bundle, recent_filings
+from .services.official_evidence import fetch_official_evidence, official_evidence_summary
+from .services.official_facts import extract_structured_facts
+from .services.official_validation import assess_official_bundle
 
 settings = get_settings()
-app = FastAPI(title="Stock Analyzer", version="0.3.0", docs_url="/api/docs")
+app = FastAPI(title="Stock Analyzer", version="0.5.0", docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -42,7 +47,7 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.3.0", "provider": settings.data_provider, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
+    return {"status": "ok", "version": "0.5.0", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
 
 
 @app.get("/api/analyze/{symbol}")
@@ -55,6 +60,41 @@ def analyze(symbol: str, db: Session = Depends(db_session)):
     db.add(snap); db.commit(); db.refresh(snap)
     payload = report.model_dump(mode="json"); payload["snapshot_id"] = snap.id
     return payload
+
+
+@app.get("/api/official-filings/{symbol}")
+def official_filings(symbol: str, force: bool = False, persist: bool = True, db: Session = Depends(db_session)):
+    """Fetch transparent NSE filing metadata without automatically downloading documents."""
+    bundle = fetch_official_evidence(symbol, force=force)
+    stored = persist_filing_bundle(db, bundle) if persist else {"created": 0, "existing": 0}
+    facts = extract_structured_facts((bundle.get("financial_results") or []) + (bundle.get("shareholding") or []))
+    return {"summary": official_evidence_summary(bundle), "facts": facts, "evidence": bundle.get("evidence", {}), "errors": bundle.get("errors", []), "storage": stored}
+
+
+@app.get("/api/official-xbrl/{symbol}")
+def official_xbrl(symbol: str, force: bool = False, db: Session = Depends(db_session)):
+    """Opt-in download/parse of the latest trusted NSE financial/shareholding documents."""
+    bundle = fetch_official_evidence(symbol, force=force)
+    persist_filing_bundle(db, bundle)
+    parsed = parse_latest_official_documents(bundle)
+    return {"summary": official_evidence_summary(bundle), "parsed": parsed, "errors": bundle.get("errors", [])}
+
+
+@app.get("/api/official-verify/{symbol}")
+def official_verify(symbol: str, force: bool = False):
+    """Compare explicit official metadata facts with the normalized provider snapshot."""
+    try:
+        metrics = StockAnalyzer()._provider().company_snapshot(symbol.strip().upper())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Normalized provider failed: {type(exc).__name__}: {exc}") from exc
+    bundle = fetch_official_evidence(symbol, force=force)
+    return assess_official_bundle(bundle, metrics)
+
+
+@app.get("/api/filing-history/{symbol}")
+def filing_history(symbol: str, limit: int = 100, db: Session = Depends(db_session)):
+    rows = recent_filings(db, symbol, limit)
+    return [{"id": r.id, "symbol": r.symbol, "source": r.source, "filing_type": r.filing_type, "source_key": r.source_key, "observed_at": r.observed_at.isoformat() if r.observed_at else None, "fetched_at": r.fetched_at.isoformat(), "period": r.period, "document_url": r.document_url} for r in rows]
 
 
 @app.get("/api/scan")
