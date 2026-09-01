@@ -101,12 +101,14 @@ def actionable_gate(
 ) -> dict[str, Any]:
     reasons: list[str] = []
     threshold = max(0.0, min(1.0, float(min_confidence)))
-    if strict_mode and not live_data:
-        reasons.append("strict mode blocks demo/fallback data")
+    if not live_data:
+        reasons.append("demo/fallback data is never actionable")
     if overall_confidence < threshold:
         reasons.append(f"overall evidence confidence is below {round(threshold * 100)}%")
     if evidence_summary.get("evidence_items", 0) and evidence_summary.get("evidence_confidence", 0) < 0.55:
         reasons.append("source-level evidence confidence is below 55%")
     if evidence_summary.get("stale_items", 0) > 0:
         reasons.append("one or more critical evidence items are stale")
+    if strict_mode and evidence_summary.get("verified_items", 0) < max(1, evidence_summary.get("evidence_items", 0) // 2):
+        reasons.append("strict mode requires a majority of evidence items to have non-demo source provenance")
     return {"actionable": not reasons, "reasons": reasons}
