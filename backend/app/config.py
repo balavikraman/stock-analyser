@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     require_official_evidence: bool = False
     official_evidence_cache_minutes: int = 20
 
+    # Prospective validation. Costs are configurable because Indian brokerage,
+    # taxes and slippage vary by product, broker and trade direction.
+    validation_benchmark_symbol: str = "^NSEI"
+    validation_round_trip_cost_pct: float = 0.25
+    validation_update_limit: int = 100
+
     default_symbol: str = "INFY.NS"
     watchlist: str = "INFY.NS,TCS.NS,HCLTECH.NS,POWERGRID.NS,NTPC.NS,ITC.NS"
 

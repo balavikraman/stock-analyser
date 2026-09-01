@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .db import SessionLocal, init_db
-from .models import AnalysisSnapshot, JournalEntry
+from .models import AnalysisSnapshot, JournalEntry, PredictionOutcome, PredictionRecord
 from .portfolio import summarize_holdings
 from .providers.zerodha_provider import ZerodhaReadOnly
 from .schemas import JournalCreate
@@ -24,9 +24,18 @@ from .services.official_facts import extract_structured_facts
 from .services.official_validation import assess_official_bundle
 from .services.sebi_public import discover_sebi_documents
 from .services.source_registry import registry_payload
+from .services.validation import (
+    HORIZONS,
+    outcome_payload,
+    prediction_payload,
+    record_analysis_predictions,
+    update_prediction_outcomes,
+    validation_metrics as calculate_validation_metrics,
+    walk_forward_plan,
+)
 
 settings = get_settings()
-app = FastAPI(title="Stock Analyzer", version="0.5.4", docs_url="/api/docs")
+app = FastAPI(title="Stock Analyzer", version="0.6.0", docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -51,7 +60,7 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.5.4", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured()}
+    return {"status": "ok", "version": "0.6.0", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured(), "prospective_validation": True}
 
 
 @app.get("/api/analyze/{symbol}")
@@ -60,9 +69,11 @@ def analyze(symbol: str, db: Session = Depends(db_session)):
         report = StockAnalyzer().analyze(symbol)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Analysis failed: {type(exc).__name__}: {exc}") from exc
-    snap = AnalysisSnapshot(symbol=report.symbol, overall_score=report.overall_score, confidence=report.overall_confidence, verdict=report.verdict, payload=report.model_dump(mode="json"))
+    report_payload = report.model_dump(mode="json")
+    snap = AnalysisSnapshot(symbol=report.symbol, overall_score=report.overall_score, confidence=report.overall_confidence, verdict=report.verdict, payload=report_payload)
     db.add(snap); db.commit(); db.refresh(snap)
-    payload = report.model_dump(mode="json"); payload["snapshot_id"] = snap.id
+    predictions = record_analysis_predictions(db, snap.id, report_payload)
+    payload = dict(report_payload); payload["snapshot_id"] = snap.id; payload["prediction_ids"] = {row.strategy: row.id for row in predictions}
     return payload
 
 
@@ -129,6 +140,51 @@ def official_verify(symbol: str, force: bool = False):
 def filing_history(symbol: str, limit: int = 100, db: Session = Depends(db_session)):
     rows = recent_filings(db, symbol, limit)
     return [{"id": r.id, "symbol": r.symbol, "source": r.source, "filing_type": r.filing_type, "source_key": r.source_key, "observed_at": r.observed_at.isoformat() if r.observed_at else None, "fetched_at": r.fetched_at.isoformat(), "period": r.period, "document_url": r.document_url} for r in rows]
+
+
+@app.get("/api/predictions")
+def predictions(symbol: str | None = None, strategy: str | None = None, limit: int = 100, db: Session = Depends(db_session)):
+    if strategy and strategy not in HORIZONS:
+        raise HTTPException(400, f"strategy must be one of: {', '.join(HORIZONS)}")
+    query = select(PredictionRecord)
+    if symbol:
+        query = query.where(PredictionRecord.symbol == symbol.strip().upper())
+    if strategy:
+        query = query.where(PredictionRecord.strategy == strategy)
+    rows = db.scalars(query.order_by(PredictionRecord.created_at.desc(), PredictionRecord.id.desc()).limit(max(1, min(limit, 500)))).all()
+    return [prediction_payload(row) for row in rows]
+
+
+@app.get("/api/predictions/{prediction_id}/outcomes")
+def prediction_outcomes(prediction_id: int, db: Session = Depends(db_session)):
+    prediction = db.get(PredictionRecord, prediction_id)
+    if prediction is None:
+        raise HTTPException(404, "prediction not found")
+    rows = db.scalars(select(PredictionOutcome).where(PredictionOutcome.prediction_id == prediction_id).order_by(PredictionOutcome.horizon_days.asc())).all()
+    return {"prediction": prediction_payload(prediction), "outcomes": [outcome_payload(row) for row in rows]}
+
+
+@app.post("/api/validation/update-outcomes")
+def validation_update(limit: int = 100, db: Session = Depends(db_session)):
+    """Mature pending outcomes using only market sessions available today."""
+    return update_prediction_outcomes(db, limit=limit)
+
+
+@app.get("/api/validation/metrics")
+def validation_metrics(symbol: str | None = None, strategy: str | None = None, model_version: str | None = None, eligible_only: bool = True, db: Session = Depends(db_session)):
+    if strategy and strategy not in HORIZONS:
+        raise HTTPException(400, f"strategy must be one of: {', '.join(HORIZONS)}")
+    return calculate_validation_metrics(db, strategy=strategy, model_version=model_version, symbol=symbol, eligible_only=eligible_only)
+
+
+@app.get("/api/validation/walk-forward")
+def validation_walk_forward(strategy: str, horizon_days: int, model_version: str | None = None, min_train_size: int = 30, test_size: int = 10, gap_size: int = 5, db: Session = Depends(db_session)):
+    if strategy not in HORIZONS:
+        raise HTTPException(400, f"strategy must be one of: {', '.join(HORIZONS)}")
+    allowed_horizons = set(HORIZONS[strategy].values())
+    if horizon_days not in allowed_horizons:
+        raise HTTPException(400, f"horizon_days for {strategy} must be one of: {', '.join(str(value) for value in sorted(allowed_horizons))}")
+    return walk_forward_plan(db, strategy=strategy, horizon_days=horizon_days, model_version=model_version, min_train_size=max(1, min(min_train_size, 10000)), test_size=max(1, min(test_size, 1000)), gap_size=max(0, min(gap_size, 1000)))
 
 
 @app.get("/api/scan")

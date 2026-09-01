@@ -23,7 +23,7 @@ def test_fresh_database_migrates_to_head(tmp_path):
 
     engine = create_engine(url)
     tables = set(inspect(engine).get_table_names())
-    assert {"analysis_snapshots", "journal_entries", "watchlist_items", "filing_snapshots", "alembic_version"}.issubset(tables)
+    assert {"analysis_snapshots", "journal_entries", "watchlist_items", "filing_snapshots", "prediction_records", "prediction_outcomes", "alembic_version"}.issubset(tables)
 
 
 def test_existing_pre_v05_database_keeps_data_and_adds_filings(tmp_path):
@@ -43,4 +43,4 @@ def test_existing_pre_v05_database_keeps_data_and_adds_filings(tmp_path):
     assert "filing_snapshots" in tables
     with engine.connect() as conn:
         assert conn.execute(text("SELECT note FROM watchlist_items WHERE id = 1")).scalar_one() == "keep me"
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260901_0001"
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260901_0002"

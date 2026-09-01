@@ -75,6 +75,11 @@ A valid historical fundamental backtest needs **point-in-time financial data** t
 - `GET /api/official-filings/{symbol}`
 - `GET /api/official-xbrl/{symbol}`
 - `GET /api/official-verify/{symbol}`
+- `GET /api/predictions` (frozen long-term and swing baseline records)
+- `GET /api/predictions/{prediction_id}/outcomes`
+- `POST /api/validation/update-outcomes`
+- `GET /api/validation/metrics`
+- `GET /api/validation/walk-forward?strategy={long_term|swing}&horizon_days={5|10|20|63|126|252}`
 - `GET /api/scan`
 - `GET/POST /api/journal`
 - `GET /api/portfolio`
