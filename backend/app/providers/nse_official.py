@@ -9,11 +9,12 @@ from ..evidence import EvidenceRecord
 
 
 class NSEOfficialEvidenceProvider:
-    """Best-effort NSE corporate filing evidence provider.
+    """Best-effort adapter for NSE company-submitted filing metadata.
 
-    NSE's public filing surfaces can change response shape and may require a warmed
-    browser-like session. This provider therefore fails closed: unavailable official
-    evidence is reported as unavailable and is never guessed.
+    NSE's website endpoints are not treated as a guaranteed public API contract. Response
+    shapes can change and requests may require a warmed browser-like session. The adapter
+    therefore fails closed: endpoint/parser failures are surfaced as errors and are never
+    converted into "no filing" conclusions.
     """
 
     name = "nse_official"
@@ -33,7 +34,7 @@ class NSEOfficialEvidenceProvider:
         return symbol.upper().replace(".NS", "").strip()
 
     @staticmethod
-    def _first(data: Any) -> list[dict[str, Any]]:
+    def _rows(data: Any) -> list[dict[str, Any]]:
         if isinstance(data, list):
             return [x for x in data if isinstance(x, dict)]
         if isinstance(data, dict):
@@ -85,14 +86,12 @@ class NSEOfficialEvidenceProvider:
     def _get_json(self, client: httpx.Client, path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
         response = client.get(f"{self.base_url}{path}", params=params, headers=self.headers)
         response.raise_for_status()
-        content_type = response.headers.get("content-type", "")
-        if "json" not in content_type.lower():
-            return []
-        return self._first(response.json())
+        if "json" not in response.headers.get("content-type", "").lower():
+            raise ValueError("NSE returned a non-JSON response")
+        return self._rows(response.json())
 
     def _session(self) -> httpx.Client:
         client = httpx.Client(timeout=self.timeout, follow_redirects=True)
-        # Warm cookies. If this fails, the API requests are still attempted and fail closed.
         try:
             client.get(self.base_url, headers=self.headers)
             client.get(f"{self.base_url}/companies-listing/corporate-filings-application", headers=self.headers)
@@ -103,84 +102,90 @@ class NSEOfficialEvidenceProvider:
     def fetch_bundle(self, symbol: str) -> dict[str, Any]:
         nse_symbol = self._clean_symbol(symbol)
         errors: list[str] = []
-        announcements: list[dict[str, Any]] = []
-        financial_results: list[dict[str, Any]] = []
-        shareholding: list[dict[str, Any]] = []
+        result: dict[str, list[dict[str, Any]]] = {
+            "announcements": [],
+            "financial_results": [],
+            "shareholding": [],
+        }
 
+        calls = (
+            ("announcements", "/api/corporate-announcements", {"index": "equities", "symbol": nse_symbol}),
+            ("financial_results", "/api/corporates-financial-results", {"index": "equities", "symbol": nse_symbol}),
+            # Current NSE website endpoint used by its shareholding filing surface.
+            ("shareholding", "/api/corporate-share-holdings-master", {"index": "equities", "symbol": nse_symbol}),
+        )
         with self._session() as client:
-            calls = (
-                ("announcements", "/api/corporate-announcements", {"index": "equities", "symbol": nse_symbol}),
-                ("financial_results", "/api/corporates-financial-results", {"index": "equities", "symbol": nse_symbol}),
-                ("shareholding", "/api/corporate-share-holdings-master", {"index": "equities", "symbol": nse_symbol}),
-            )
             for name, path, params in calls:
                 try:
-                    rows = self._get_json(client, path, params)
-                    if name == "announcements":
-                        announcements = rows
-                    elif name == "financial_results":
-                        financial_results = rows
-                    else:
-                        shareholding = rows
+                    result[name] = self._get_json(client, path, params)
                 except (httpx.HTTPError, ValueError) as exc:
                     errors.append(f"NSE {name} unavailable: {type(exc).__name__}")
 
         evidence: dict[str, dict[str, Any]] = {}
+        fetched = datetime.now(timezone.utc).isoformat()
 
-        if announcements:
-            latest = announcements[0]
+        if result["announcements"]:
+            latest = result["announcements"][0]
             observed = self._iso_date(self._pick(latest, "broadcastDateTime", "broadcastDate", "an_dt", "date"))
             evidence["nse_latest_announcement"] = EvidenceRecord(
                 value={
                     "subject": self._pick(latest, "subject", "desc", "announcement"),
                     "symbol": self._pick(latest, "symbol") or nse_symbol,
+                    "attachment": self._pick(latest, "attchmntFile", "attachment", "fileName"),
                 },
                 source="National Stock Exchange of India",
                 source_type="exchange_filing",
                 observed_at=observed,
-                fetched_at=datetime.now(timezone.utc).isoformat(),
+                fetched_at=fetched,
                 confidence=0.90,
-                stale_after_days=45,
-                url=f"{self.base_url}/companies-listing/corporate-filings-application?param={nse_symbol}",
+                # An old latest announcement is not itself evidence that the dataset is stale.
+                stale_after_days=None,
+                url=f"{self.base_url}/companies-listing/corporate-filings-announcements?symbol={nse_symbol}",
             ).to_dict()
 
-        if financial_results:
-            latest = financial_results[0]
+        if result["financial_results"]:
+            latest = result["financial_results"][0]
             observed = self._iso_date(self._pick(latest, "broadcastDateTime", "broadcastDate", "submissionDate", "date"))
             period = self._pick(latest, "periodEnded", "period_ended", "toDate", "period")
             evidence["nse_latest_financial_result"] = EvidenceRecord(
-                value={"period": period, "symbol": self._pick(latest, "symbol") or nse_symbol},
+                value={
+                    "period": period,
+                    "symbol": self._pick(latest, "symbol") or nse_symbol,
+                    "xbrl": self._pick(latest, "xbrl", "xbrlFile", "xbrlLink", "attachment"),
+                },
                 source="National Stock Exchange of India",
                 source_type="exchange_filing",
                 observed_at=observed,
                 period=str(period) if period else None,
-                fetched_at=datetime.now(timezone.utc).isoformat(),
+                fetched_at=fetched,
                 confidence=0.95,
-                stale_after_days=180,
-                url=f"{self.base_url}/companies-listing/corporate-filings-application?param={nse_symbol}",
+                stale_after_days=200,
+                url=f"{self.base_url}/companies-listing/corporate-filings-financial-results?symbol={nse_symbol}",
             ).to_dict()
 
-        if shareholding:
-            latest = shareholding[0]
+        if result["shareholding"]:
+            latest = result["shareholding"][0]
             observed = self._iso_date(self._pick(latest, "broadcastDateTime", "broadcastDate", "submissionDate", "date"))
-            period = self._pick(latest, "asOnDate", "as_on_date", "period")
+            period = self._pick(latest, "asOnDate", "as_on_date", "period", "toDate")
             evidence["nse_latest_shareholding"] = EvidenceRecord(
-                value={"as_on": period, "symbol": self._pick(latest, "symbol") or nse_symbol},
+                value={
+                    "as_on": period,
+                    "symbol": self._pick(latest, "symbol") or nse_symbol,
+                    "xbrl": self._pick(latest, "xbrl", "xbrlFile", "xbrlLink", "attachment"),
+                },
                 source="National Stock Exchange of India",
                 source_type="exchange_filing",
                 observed_at=observed,
                 period=str(period) if period else None,
-                fetched_at=datetime.now(timezone.utc).isoformat(),
+                fetched_at=fetched,
                 confidence=0.95,
-                stale_after_days=150,
-                url=f"{self.base_url}/companies-listing/corporate-filings-application?param={nse_symbol}",
+                stale_after_days=170,
+                url=f"{self.base_url}/companies-listing/corporate-filings-shareholding-pattern?symbol={nse_symbol}",
             ).to_dict()
 
         return {
             "symbol": nse_symbol,
-            "announcements": announcements,
-            "financial_results": financial_results,
-            "shareholding": shareholding,
+            **result,
             "evidence": evidence,
             "errors": errors,
             "source": "National Stock Exchange of India",
