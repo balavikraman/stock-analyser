@@ -15,9 +15,11 @@ from .portfolio import summarize_holdings
 from .providers.zerodha_provider import ZerodhaReadOnly
 from .schemas import JournalCreate
 from .services.analyzer import StockAnalyzer
+from .services.filing_documents import parse_latest_official_documents
 from .services.filing_store import persist_filing_bundle, recent_filings
 from .services.official_evidence import fetch_official_evidence, official_evidence_summary
 from .services.official_facts import extract_structured_facts
+from .services.official_validation import assess_official_bundle
 
 settings = get_settings()
 app = FastAPI(title="Stock Analyzer", version="0.5.0", docs_url="/api/docs")
@@ -62,11 +64,31 @@ def analyze(symbol: str, db: Session = Depends(db_session)):
 
 @app.get("/api/official-filings/{symbol}")
 def official_filings(symbol: str, force: bool = False, persist: bool = True, db: Session = Depends(db_session)):
-    """Fetch transparent NSE evidence, optionally persist raw filing metadata locally."""
+    """Fetch transparent NSE filing metadata without automatically downloading documents."""
     bundle = fetch_official_evidence(symbol, force=force)
     stored = persist_filing_bundle(db, bundle) if persist else {"created": 0, "existing": 0}
     facts = extract_structured_facts((bundle.get("financial_results") or []) + (bundle.get("shareholding") or []))
     return {"summary": official_evidence_summary(bundle), "facts": facts, "evidence": bundle.get("evidence", {}), "errors": bundle.get("errors", []), "storage": stored}
+
+
+@app.get("/api/official-xbrl/{symbol}")
+def official_xbrl(symbol: str, force: bool = False, db: Session = Depends(db_session)):
+    """Opt-in download/parse of the latest trusted NSE financial/shareholding documents."""
+    bundle = fetch_official_evidence(symbol, force=force)
+    persist_filing_bundle(db, bundle)
+    parsed = parse_latest_official_documents(bundle)
+    return {"summary": official_evidence_summary(bundle), "parsed": parsed, "errors": bundle.get("errors", [])}
+
+
+@app.get("/api/official-verify/{symbol}")
+def official_verify(symbol: str, force: bool = False):
+    """Compare explicit official metadata facts with the normalized provider snapshot."""
+    try:
+        metrics = StockAnalyzer()._provider().company_snapshot(symbol.strip().upper())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Normalized provider failed: {type(exc).__name__}: {exc}") from exc
+    bundle = fetch_official_evidence(symbol, force=force)
+    return assess_official_bundle(bundle, metrics)
 
 
 @app.get("/api/filing-history/{symbol}")
