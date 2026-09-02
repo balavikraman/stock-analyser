@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from math import isfinite
+from math import sqrt
 from typing import Any, Iterable
 
 from sqlalchemy import select
@@ -423,11 +424,22 @@ def _aggregate(rows: list[tuple[PredictionRecord, PredictionOutcome]]) -> dict[s
     brier = None
     if calibrated:
         brier = sum((float(p.model_probability) - (1.0 if success else 0.0)) ** 2 for p, _, success in calibrated) / len(calibrated)
+    minimum = get_settings().validation_minimum_rule_sample
+    sufficient = len(evaluable) >= minimum
+    successes = sum(1 for _, _, success in positive if success)
+    interval = None
+    if positive:
+        # Wilson interval: conservative uncertainty for a binomial precision rate.
+        n, z = len(positive), 1.96
+        centre = (successes / n + z * z / (2 * n)) / (1 + z * z / n)
+        margin = z * sqrt((successes / n * (1 - successes / n) + z * z / (4 * n)) / n) / (1 + z * z / n)
+        interval = [round(max(0.0, centre - margin), 4), round(min(1.0, centre + margin), 4)]
     return {
         "completed": len(rows),
         "evaluable": len(evaluable),
         "positive_signals": len(positive),
-        "precision": round(sum(1 for _, _, success in positive if success) / len(positive), 4) if positive else None,
+        "precision": round(successes / len(positive), 4) if positive else None,
+        "precision_95pct_interval": interval,
         "win_rate": round(sum(1 for _, _, success in evaluable if success) / len(evaluable), 4) if evaluable else None,
         "average_net_return_pct": round(sum(returns) / len(returns), 4) if returns else None,
         "average_excess_return_pct": round(sum(o.excess_return_pct for _, o, _ in evaluable if o.excess_return_pct is not None) / len([1 for _, o, _ in evaluable if o.excess_return_pct is not None]), 4) if any(o.excess_return_pct is not None for _, o, _ in evaluable) else None,
@@ -435,6 +447,9 @@ def _aggregate(rows: list[tuple[PredictionRecord, PredictionOutcome]]) -> dict[s
         "worst_adverse_excursion_pct": min((o.max_adverse_excursion_pct for _, o, _ in evaluable if o.max_adverse_excursion_pct is not None), default=None),
         "brier_score": round(brier, 4) if brier is not None else None,
         "calibrated_probabilities": len(calibrated),
+        "sample_requirement": minimum,
+        "evidence_status": "sufficient" if sufficient else "insufficient",
+        "rule_status": "eligible_for_review" if sufficient else "collect_more_outcomes",
     }
 
 
@@ -460,6 +475,15 @@ def _sector_bucket(prediction: PredictionRecord) -> str:
 
 def _breadth_bucket(prediction: PredictionRecord) -> str:
     return str(((prediction.input_snapshot or {}).get("market_breadth") or {}).get("state") or "UNKNOWN")
+
+
+def _rule_decision(metrics: dict[str, Any], baseline: dict[str, Any]) -> str:
+    if metrics["evidence_status"] != "sufficient":
+        return "collect_more_outcomes"
+    value, base = metrics.get("average_excess_return_pct"), baseline.get("average_excess_return_pct")
+    if value is None or base is None:
+        return "review"
+    return "keep" if value > 0 and value >= base else "review"
 
 
 def validation_metrics(
@@ -492,6 +516,7 @@ def validation_metrics(
     forensic: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
     sectors: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
     breadth: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
+    combinations: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
     for pair in complete_rows:
         grouped[pair[1].horizon_days].append(pair)
         regimes[_context_bucket(pair[0], "market_regime")].append(pair)
@@ -499,19 +524,34 @@ def validation_metrics(
         forensic[_forensic_bucket(pair[0])].append(pair)
         sectors[_sector_bucket(pair[0])].append(pair)
         breadth[_breadth_bucket(pair[0])].append(pair)
+        combinations[f"regime={_context_bucket(pair[0], 'market_regime')} | breadth={_breadth_bucket(pair[0])} | strength={_context_bucket(pair[0], 'relative_strength')}"] .append(pair)
+    baseline = _aggregate(complete_rows)
+    attribution = {}
+    for key, rows in sorted(combinations.items()):
+        metrics = _aggregate(rows)
+        attribution[key] = {**metrics, "baseline_average_excess_return_pct": baseline.get("average_excess_return_pct"), "rule_decision": _rule_decision(metrics, baseline)}
     return {
         "filters": {"strategy": strategy, "model_version": model_version, "symbol": symbol.upper() if symbol else None, "eligible_only": eligible_only},
         "prediction_count": len(predictions),
         "actionable_count": sum(1 for row in predictions if row.actionable),
         "coverage": round(sum(1 for row in predictions if row.actionable) / len(predictions), 4) if predictions else None,
         "pending_outcomes": sum(1 for row in outcomes if row.status != "complete"),
-        "overall": _aggregate(complete_rows),
+        "overall": baseline,
         "by_horizon": {str(days): _aggregate(rows) for days, rows in sorted(grouped.items())},
         "by_market_regime": {key: _aggregate(rows) for key, rows in sorted(regimes.items())},
         "by_relative_strength": {key: _aggregate(rows) for key, rows in sorted(strengths.items())},
         "by_forensic_risk": {key: _aggregate(rows) for key, rows in sorted(forensic.items())},
         "by_sector": {key: _aggregate(rows) for key, rows in sorted(sectors.items())},
         "by_market_breadth": {key: _aggregate(rows) for key, rows in sorted(breadth.items())},
+        "rule_attribution": attribution,
+        "statistical_validity": {
+            "minimum_comparable_outcomes": get_settings().validation_minimum_rule_sample,
+            "precision_interval_method": "Wilson 95% interval",
+            "selection_method": "chronological purged walk-forward only",
+            "random_split_used": False,
+            "historical_reconstruction_supported": False,
+            "rule_change_guard": "Do not promote, retire, or calibrate a rule until it has sufficient prospective comparable outcomes.",
+        },
         "probability_note": "model_probability remains null until prospective outcomes support calibration",
         "success_definition": {"swing": "net return after estimated costs is positive", "long_term": "net return exceeds the configured benchmark"},
     }
