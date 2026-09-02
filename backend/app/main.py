@@ -35,9 +35,10 @@ from .services.validation import (
 from .services.validation_runner import execute_validation_run, validation_runner_status
 from .services.research_alerts import alert_status, build_research_alert
 from .services.metals import METALS, analyse_metal
+from .services.research_runner import execute_research_run, research_runner_status
 
 settings = get_settings()
-APP_VERSION = "0.10.3"
+APP_VERSION = "0.10.4"
 app = FastAPI(title="Stock Analyzer", version=APP_VERSION, docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -223,6 +224,16 @@ def scan(limit: int = 12):
         except Exception as exc:
             results.append({"symbol": symbol, "error": type(exc).__name__})
     return sorted(results, key=lambda x: (x.get("score") is not None, x.get("score") or -1), reverse=True)
+
+
+@app.post("/api/research/run")
+def run_daily_research(db: Session = Depends(db_session)):
+    return execute_research_run(db, triggered_by="api")
+
+
+@app.get("/api/research/status")
+def daily_research_status(db: Session = Depends(db_session)):
+    return research_runner_status(db)
 
 
 @app.get("/api/journal")
