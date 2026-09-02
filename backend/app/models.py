@@ -105,6 +105,12 @@ class PredictionOutcome(Base):
     excess_return_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_favorable_excursion_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_adverse_excursion_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # These are outcome measurements for the frozen swing baseline.  They are
+    # deliberately not trade instructions and never infer an intraday ordering
+    # when the daily bar touched both levels.
+    target_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stop_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_stop_status: Mapped[str | None] = mapped_column(String(48), nullable=True)
     price_source: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 

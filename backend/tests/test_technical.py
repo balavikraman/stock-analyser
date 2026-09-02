@@ -14,3 +14,5 @@ def test_technical_has_core_indicators():
     assert r["sma200"] is not None
     assert 0 <= r["score"] <= 100
     assert r["support_near"] <= r["resistance_near"]
+    assert r["liquidity"] == "ADEQUATE"
+    assert r["average_turnover_20d"] is not None

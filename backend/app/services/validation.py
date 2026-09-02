@@ -73,12 +73,32 @@ def _swing_signal(report: dict[str, Any]) -> str:
 
 def _input_snapshot(report: dict[str, Any], snapshot_id: int) -> dict[str, Any]:
     quality = report.get("data_quality") or {}
+    technicals = report.get("technicals") or {}
+    price = _number(report.get("price"))
+    atr = _number(technicals.get("atr14"))
+    swing_evaluation: dict[str, Any] = {
+        "available": False,
+        "purpose": "prospective baseline outcome measurement, not a trade instruction",
+    }
+    if price and price > 0 and atr and atr > 0:
+        swing_evaluation = {
+            "available": True,
+            "entry_price": round(price, 6),
+            "long_stop_price": round(max(0.01, price - atr), 6),
+            "long_target_price": round(price + 2 * atr, 6),
+            "short_stop_price": round(price + atr, 6),
+            "short_target_price": round(max(0.01, price - 2 * atr), 6),
+            "reward_risk_ratio": 2.0,
+            "rule": "one ATR stop and two ATR target frozen at signal time",
+            "purpose": "prospective baseline outcome measurement, not a trade instruction",
+        }
     return {
         "analysis_snapshot_id": snapshot_id,
         "as_of": report.get("as_of"),
         "scores": report.get("scores") or {},
         "metrics": report.get("metrics") or {},
-        "technicals": report.get("technicals") or {},
+        "sector": report.get("sector") or "UNKNOWN",
+        "technicals": technicals,
         "entry_plan": report.get("entry_plan") or {},
         "scenarios": report.get("scenarios") or {},
         "evidence": quality.get("evidence") or {},
@@ -87,9 +107,21 @@ def _input_snapshot(report: dict[str, Any], snapshot_id: int) -> dict[str, Any]:
         # Point-in-time context: later validation must not substitute today's
         # regime or relative strength for what was known at signal creation.
         "market_regime": quality.get("market_regime") or {},
+        "market_breadth": quality.get("market_breadth") or {},
         "relative_strength": quality.get("relative_strength") or {},
         "official_events": quality.get("official_events") or {},
+        "forensic_score": quality.get("forensic_score"),
+        "forensic_flags": quality.get("forensic_flags") or [],
+        "sector_risk": quality.get("sector_risk") or {},
         "action_block_reasons": quality.get("action_block_reasons") or [],
+        "swing_evaluation": swing_evaluation,
+        "point_in_time": {
+            "status": "frozen_at_signal_time",
+            "analysis_as_of": report.get("as_of"),
+            "official_evidence": quality.get("evidence") or {},
+            "historical_reconstruction_supported": False,
+            "historical_reconstruction_note": "Historical simulations require archived source publication dates; this record is valid for prospective validation only.",
+        },
     }
 
 
@@ -168,6 +200,47 @@ def _price_series(rows: Iterable[dict[str, Any]], as_of: date | None = None) -> 
     return sorted(series.items())
 
 
+def _ohlc_series(rows: Iterable[dict[str, Any]], as_of: date | None = None) -> list[tuple[date, float, float]]:
+    """Return usable daily high/low bars, never filling absent highs/lows from close."""
+    series: dict[date, tuple[float, float]] = {}
+    for row in rows:
+        high, low = _number(row.get("high")), _number(row.get("low"))
+        try:
+            observed = date.fromisoformat(str(row.get("date"))[:10])
+        except (TypeError, ValueError):
+            continue
+        if high is None or low is None or low <= 0 or high < low or (as_of and observed > as_of):
+            continue
+        series[observed] = (high, low)
+    return [(observed, high, low) for observed, (high, low) in sorted(series.items())]
+
+
+def _target_stop_measurement(prediction: PredictionRecord, stock_history: list[dict[str, Any]], start_date: date, end_date: date) -> dict[str, Any]:
+    if prediction.strategy != "swing":
+        return {}
+    spec = (prediction.input_snapshot or {}).get("swing_evaluation") or {}
+    signal = prediction.signal
+    if not spec.get("available") or signal not in {"BULLISH_SETUP", "BEARISH_SETUP"}:
+        return {"target_stop_status": "not_applicable"}
+    direction = "long" if signal == "BULLISH_SETUP" else "short"
+    target = _number(spec.get(f"{direction}_target_price"))
+    stop = _number(spec.get(f"{direction}_stop_price"))
+    if target is None or stop is None:
+        return {"target_stop_status": "not_available"}
+    for observed, high, low in _ohlc_series(stock_history):
+        if observed < start_date or observed > end_date:
+            continue
+        target_hit = high >= target if direction == "long" else low <= target
+        stop_hit = low <= stop if direction == "long" else high >= stop
+        if target_hit and stop_hit:
+            return {"target_price": target, "stop_price": stop, "target_stop_status": "ambiguous_same_session"}
+        if target_hit:
+            return {"target_price": target, "stop_price": stop, "target_stop_status": "target_hit_first"}
+        if stop_hit:
+            return {"target_price": target, "stop_price": stop, "target_stop_status": "stop_hit_first"}
+    return {"target_price": target, "stop_price": stop, "target_stop_status": "neither_hit"}
+
+
 def _on_or_after(series: list[tuple[date, float]], target: date) -> int | None:
     return next((index for index, (observed, _) in enumerate(series) if observed >= target), None)
 
@@ -233,6 +306,7 @@ def calculate_forward_outcome(
         "excess_return_pct": round(net - benchmark_return, 4) if benchmark_return is not None else None,
         "max_favorable_excursion_pct": round((max(window) / entry_price - 1) * 100, 4),
         "max_adverse_excursion_pct": round((min(window) / entry_price - 1) * 100, 4),
+        **_target_stop_measurement(prediction, stock_history, start_date, end_date),
     }
 
 
@@ -371,6 +445,23 @@ def _context_bucket(prediction: PredictionRecord, key: str, fallback: str = "UNK
     return str(value or fallback)
 
 
+def _forensic_bucket(prediction: PredictionRecord) -> str:
+    flags = (prediction.input_snapshot or {}).get("forensic_flags") or []
+    if any(flag.get("severity") == "high" for flag in flags if isinstance(flag, dict)):
+        return "HIGH_RISK"
+    if any(flag.get("severity") == "medium" for flag in flags if isinstance(flag, dict)):
+        return "MEDIUM_RISK"
+    return "NO_HIGH_MEDIUM_FLAG"
+
+
+def _sector_bucket(prediction: PredictionRecord) -> str:
+    return str((prediction.input_snapshot or {}).get("sector") or "UNKNOWN")
+
+
+def _breadth_bucket(prediction: PredictionRecord) -> str:
+    return str(((prediction.input_snapshot or {}).get("market_breadth") or {}).get("state") or "UNKNOWN")
+
+
 def validation_metrics(
     db: Session,
     *,
@@ -398,10 +489,16 @@ def validation_metrics(
     grouped: dict[int, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
     regimes: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
     strengths: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
+    forensic: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
+    sectors: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
+    breadth: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
     for pair in complete_rows:
         grouped[pair[1].horizon_days].append(pair)
         regimes[_context_bucket(pair[0], "market_regime")].append(pair)
         strengths[_context_bucket(pair[0], "relative_strength")].append(pair)
+        forensic[_forensic_bucket(pair[0])].append(pair)
+        sectors[_sector_bucket(pair[0])].append(pair)
+        breadth[_breadth_bucket(pair[0])].append(pair)
     return {
         "filters": {"strategy": strategy, "model_version": model_version, "symbol": symbol.upper() if symbol else None, "eligible_only": eligible_only},
         "prediction_count": len(predictions),
@@ -412,6 +509,9 @@ def validation_metrics(
         "by_horizon": {str(days): _aggregate(rows) for days, rows in sorted(grouped.items())},
         "by_market_regime": {key: _aggregate(rows) for key, rows in sorted(regimes.items())},
         "by_relative_strength": {key: _aggregate(rows) for key, rows in sorted(strengths.items())},
+        "by_forensic_risk": {key: _aggregate(rows) for key, rows in sorted(forensic.items())},
+        "by_sector": {key: _aggregate(rows) for key, rows in sorted(sectors.items())},
+        "by_market_breadth": {key: _aggregate(rows) for key, rows in sorted(breadth.items())},
         "probability_note": "model_probability remains null until prospective outcomes support calibration",
         "success_definition": {"swing": "net return after estimated costs is positive", "long_term": "net return exceeds the configured benchmark"},
     }
@@ -522,6 +622,12 @@ def outcome_payload(row: PredictionOutcome) -> dict[str, Any]:
         "excess_return_pct": row.excess_return_pct,
         "max_favorable_excursion_pct": row.max_favorable_excursion_pct,
         "max_adverse_excursion_pct": row.max_adverse_excursion_pct,
+        "swing_target_stop": {
+            "target_price": row.target_price,
+            "stop_price": row.stop_price,
+            "status": row.target_stop_status,
+            "note": "Daily bars cannot establish the order when target and stop were both touched in one session.",
+        },
         "price_source": row.price_source,
         "error": row.error,
     }

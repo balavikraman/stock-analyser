@@ -61,6 +61,16 @@ class YFinanceProvider(MarketDataProvider):
                 c = matching_b[0]
                 for n in ("Total Debt", "Long Term Debt And Capital Lease Obligation"):
                     if n in balance.index: row["debt"] = _num(balance.loc[n, c]); break
+                for key, names in {"receivables": ("Accounts Receivable", "Receivables"), "inventory": ("Inventory",)}.items():
+                    for n in names:
+                        if n in balance.index:
+                            row[key] = _num(balance.loc[n, c]); break
+                for n in ("Ordinary Shares Number", "Share Issued", "Common Stock Equity"):
+                    if n in balance.index:
+                        value = _num(balance.loc[n, c])
+                        if n != "Common Stock Equity":
+                            row["shares_outstanding"] = value
+                        break
         return rows
 
     def quarterly_financials(self, symbol: str) -> list[dict[str, Any]]:

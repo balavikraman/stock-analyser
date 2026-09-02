@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # Free, broad-market reference used only as a decision guardrail. It is
     # deliberately separate from the outcome-validation benchmark setting.
     market_regime_benchmark_symbol: str = "^NSEI"
+    market_breadth_minimum_symbols: int = 3
 
     # Read-only portfolio guardrails. These report concentration risk and never
     # submit or modify a broker order.

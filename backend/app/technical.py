@@ -44,6 +44,9 @@ def analyze_technicals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     resistance20 = float(df["high"].tail(20).max())
     atr = float(last["atr14"]) if pd.notna(last["atr14"]) else None
     rsi = float(last["rsi14"]) if pd.notna(last["rsi14"]) else None
+    avg_turnover = float((df["close"] * df["volume"]).tail(20).mean()) if df["volume"].tail(20).notna().any() else None
+    volume_ratio = float(last["volume"] / last["vol20"]) if pd.notna(last["vol20"]) and last["vol20"] > 0 and pd.notna(last["volume"]) else None
+    atr_pct = (atr / price * 100) if atr is not None and price else None
 
     points = available = 0.0
     for p, weight in ((20, 8), (50, 10), (100, 8), (200, 14)):
@@ -69,4 +72,5 @@ def analyze_technicals(rows: list[dict[str, Any]]) -> dict[str, Any]:
     else: points += 3
     score = round(points / available * 100, 1) if available else None
     confidence = min(1.0, len(df) / 252)
-    return {"score": score, "confidence": round(confidence, 2), "price": price, "sma20": _safe(last["sma20"]), "sma50": _safe(last["sma50"]), "sma100": _safe(last["sma100"]), "sma200": _safe(last["sma200"]), "rsi14": _safe(last["rsi14"]), "macd": _safe(last["macd"]), "macd_signal": _safe(last["macd_signal"]), "atr14": atr, "high_52w": high_52, "low_52w": low_52, "drawdown_from_52w_high_pct": round(drawdown, 2), "support_near": support20, "support_major": support60, "resistance_near": resistance20}
+    liquidity = "UNKNOWN" if avg_turnover is None else "THIN" if avg_turnover < 1_000_000 else "ADEQUATE"
+    return {"score": score, "confidence": round(confidence, 2), "price": price, "sma20": _safe(last["sma20"]), "sma50": _safe(last["sma50"]), "sma100": _safe(last["sma100"]), "sma200": _safe(last["sma200"]), "rsi14": _safe(last["rsi14"]), "macd": _safe(last["macd"]), "macd_signal": _safe(last["macd_signal"]), "atr14": atr, "atr_pct": _safe(atr_pct), "volume_ratio_20d": _safe(volume_ratio), "average_turnover_20d": _safe(avg_turnover), "liquidity": liquidity, "high_52w": high_52, "low_52w": low_52, "drawdown_from_52w_high_pct": round(drawdown, 2), "support_near": support20, "support_major": support60, "resistance_near": resistance20}

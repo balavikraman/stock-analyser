@@ -1,4 +1,10 @@
 from backend.app.services.official_validation import assess_official_bundle, official_action_blocks
+from backend.app.services.official_facts import extract_structured_facts
+
+
+def test_explicit_promoter_pledge_fact_is_extracted():
+    facts = extract_structured_facts([{"label": "Promoter pledge percentage", "value": "12.5%"}])
+    assert facts["promoter_pledge"]["value"] == 12.5
 
 
 def test_high_official_mismatch_blocks_action():

@@ -9,7 +9,7 @@ from ..providers.nse_official import NSEOfficialEvidenceProvider
 EVENT_TERMS = {
     "RESULTS": ("financial results", "earnings", "quarterly results", "board meeting"),
     "CORPORATE_ACTION": ("dividend", "buyback", "split", "bonus", "rights issue"),
-    "GOVERNANCE": ("resignation", "fraud", "investigation", "default", "pledge", "penalty"),
+    "GOVERNANCE": ("resignation", "auditor", "statutory auditor", "independent director", "key managerial", "fraud", "investigation", "default", "pledge", "penalty"),
 }
 
 
