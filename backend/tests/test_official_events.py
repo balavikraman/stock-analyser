@@ -16,3 +16,9 @@ def test_old_or_unclassified_filing_does_not_claim_clearance():
     result = assess_official_events(bundle)
     assert result["review_required"] is False
     assert "not conclusive" in result["reason"]
+
+
+def test_recent_auditor_filing_requires_governance_review():
+    now = datetime.now(timezone.utc).strftime("%d-%b-%Y %H:%M:%S")
+    result = assess_official_events({"available": True, "announcements": [{"subject": "Resignation of statutory auditor", "broadcastDateTime": now}]})
+    assert result["review_required"] is True
