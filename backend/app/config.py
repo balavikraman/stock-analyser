@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = ""
     data_provider: str = "auto"
+    allow_demo_fallback_for_real_symbols: bool = False
     strict_analysis_mode: bool = False
     min_actionable_confidence: float = 0.60
 
@@ -32,6 +33,7 @@ class Settings(BaseSettings):
     validation_update_limit: int = 100
     validation_timezone: str = "Asia/Kolkata"
     validation_run_timeout_minutes: int = 120
+    validation_minimum_rule_sample: int = 30
 
     # Free, broad-market reference used only as a decision guardrail. It is
     # deliberately separate from the outcome-validation benchmark setting.
