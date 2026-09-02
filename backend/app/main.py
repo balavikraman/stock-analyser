@@ -37,7 +37,7 @@ from .services.research_alerts import alert_status, build_research_alert
 from .services.metals import METALS, analyse_metal
 
 settings = get_settings()
-APP_VERSION = "0.10.1"
+APP_VERSION = "0.10.2"
 app = FastAPI(title="Stock Analyzer", version=APP_VERSION, docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
