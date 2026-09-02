@@ -33,6 +33,7 @@ from .services.validation import (
     walk_forward_plan,
 )
 from .services.validation_runner import execute_validation_run, validation_runner_status
+from .services.research_alerts import alert_status, build_research_alert
 
 settings = get_settings()
 app = FastAPI(title="Stock Analyzer", version="0.6.1", docs_url="/api/docs")
@@ -250,8 +251,24 @@ def zerodha_callback(request_token: str):
 def portfolio():
     z = ZerodhaReadOnly()
     if not z.configured():
-        return {"connected": False, "reason": "Zerodha is not configured", "summary": summarize_holdings([])}
+        return {"connected": False, "reason": "Zerodha is not configured", "summary": summarize_holdings([], settings.portfolio_max_position_pct, settings.portfolio_max_concentration_index)}
     try:
-        holdings = z.holdings(); return {"connected": True, "summary": summarize_holdings(holdings)}
+        holdings = z.holdings(); return {"connected": True, "summary": summarize_holdings(holdings, settings.portfolio_max_position_pct, settings.portfolio_max_concentration_index)}
     except Exception as exc:
-        return {"connected": False, "reason": f"Login required or token expired: {type(exc).__name__}", "summary": summarize_holdings([])}
+        return {"connected": False, "reason": f"Login required or token expired: {type(exc).__name__}", "summary": summarize_holdings([], settings.portfolio_max_position_pct, settings.portfolio_max_concentration_index)}
+
+
+@app.get("/api/alerts/status")
+def alerts_status():
+    """Shows local Telegram configuration only; does not contact Telegram."""
+    return alert_status(settings)
+
+
+@app.get("/api/alerts/preview/{symbol}")
+def alerts_preview(symbol: str):
+    """Generates a candidate research alert without delivery or broker action."""
+    try:
+        report = StockAnalyzer().analyze(symbol).model_dump(mode="json")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Analysis failed: {type(exc).__name__}: {exc}") from exc
+    return {"status": alert_status(settings), "candidate": build_research_alert(report, settings.telegram_min_actionable_confidence)}
