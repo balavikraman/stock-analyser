@@ -37,6 +37,17 @@ class Settings(BaseSettings):
     # deliberately separate from the outcome-validation benchmark setting.
     market_regime_benchmark_symbol: str = "^NSEI"
 
+    # Read-only portfolio guardrails. These report concentration risk and never
+    # submit or modify a broker order.
+    portfolio_max_position_pct: float = 15.0
+    portfolio_max_concentration_index: float = 25.0
+
+    # Optional local-only research alerts. Empty values keep alerts disabled.
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    telegram_alerts_enabled: bool = False
+    telegram_min_actionable_confidence: float = 0.70
+
     default_symbol: str = "INFY.NS"
     watchlist: str = "INFY.NS,TCS.NS,HCLTECH.NS,POWERGRID.NS,NTPC.NS,ITC.NS"
 
