@@ -106,6 +106,43 @@ def test_forward_outcome_stays_pending_until_full_horizon_exists():
     assert result.get("end_date") is None
 
 
+def test_swing_target_stop_measurement_uses_daily_bars_and_marks_same_day_order_ambiguous():
+    prediction = PredictionRecord(
+        created_at=datetime(2026, 1, 1), symbol="INFY.NS", strategy="swing", signal="BULLISH_SETUP",
+        entry_price=100, horizon_spec={"5d": 5},
+        input_snapshot={"swing_evaluation": {"available": True, "long_target_price": 110, "long_stop_price": 95}},
+    )
+    stock = [
+        {"date": "2026-01-01", "close": 100, "high": 102, "low": 99},
+        {"date": "2026-01-02", "close": 98, "high": 100, "low": 94},
+        {"date": "2026-01-03", "close": 111, "high": 112, "low": 108},
+        {"date": "2026-01-04", "close": 105, "high": 111, "low": 94},
+        {"date": "2026-01-05", "close": 106, "high": 107, "low": 103},
+        {"date": "2026-01-06", "close": 107, "high": 108, "low": 105},
+    ]
+    result = calculate_forward_outcome(prediction, "5d", 5, stock, [])
+
+    assert result["target_price"] == 110
+    assert result["stop_price"] == 95
+    assert result["target_stop_status"] == "stop_hit_first"
+
+    prediction.input_snapshot["swing_evaluation"] = {"available": True, "long_target_price": 110, "long_stop_price": 95}
+    stock[1] = {"date": "2026-01-02", "close": 100, "high": 111, "low": 94}
+    result = calculate_forward_outcome(prediction, "5d", 5, stock, [])
+    assert result["target_stop_status"] == "ambiguous_same_session"
+
+
+def test_prediction_snapshot_marks_historical_reconstruction_as_unsupported():
+    db = _session()
+    snapshot = AnalysisSnapshot(symbol="INFY.NS", overall_score=80, confidence=0.7, verdict="ACCUMULATE", payload=_report())
+    db.add(snapshot); db.commit(); db.refresh(snapshot)
+    swing = next(row for row in record_analysis_predictions(db, snapshot.id, _report()) if row.strategy == "swing")
+
+    assert swing.input_snapshot["point_in_time"]["status"] == "frozen_at_signal_time"
+    assert swing.input_snapshot["point_in_time"]["historical_reconstruction_supported"] is False
+    assert swing.input_snapshot["swing_evaluation"]["available"] is False
+
+
 class FakeProvider:
     name = "fake_point_in_time"
 
