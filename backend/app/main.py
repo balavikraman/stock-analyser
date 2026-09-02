@@ -37,7 +37,7 @@ from .services.research_alerts import alert_status, build_research_alert
 from .services.metals import METALS, analyse_metal
 
 settings = get_settings()
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.10.0"
 app = FastAPI(title="Stock Analyzer", version=APP_VERSION, docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -219,7 +219,7 @@ def scan(limit: int = 12):
     for symbol in settings.watchlist_symbols[: max(1, min(limit, 30))]:
         try:
             r = analyzer.analyze(symbol)
-            results.append({"symbol": symbol, "company_name": r.company_name, "score": r.overall_score, "confidence": r.overall_confidence, "verdict": r.verdict, "price": r.price})
+            results.append({"symbol": symbol, "company_name": r.company_name, "score": r.overall_score, "confidence": r.overall_confidence, "verdict": r.verdict, "price": r.price, "actionable": r.entry_plan.get("actionable", False), "block_reasons": r.entry_plan.get("block_reasons", []), "tomorrow_bias": r.tomorrow_outlook.get("bias")})
         except Exception as exc:
             results.append({"symbol": symbol, "error": type(exc).__name__})
     return sorted(results, key=lambda x: (x.get("score") is not None, x.get("score") or -1), reverse=True)

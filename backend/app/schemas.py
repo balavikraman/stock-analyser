@@ -42,6 +42,7 @@ class AnalysisReport(BaseModel):
     technicals: dict[str, Any]
     price_history: list[dict[str, Any]]
     entry_plan: dict[str, Any]
+    tomorrow_outlook: dict[str, Any]
     scenarios: dict[str, Any]
     news: list[dict[str, Any]]
     risks: list[str]
