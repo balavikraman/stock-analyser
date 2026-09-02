@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     validation_timezone: str = "Asia/Kolkata"
     validation_run_timeout_minutes: int = 120
 
+    # Free, broad-market reference used only as a decision guardrail. It is
+    # deliberately separate from the outcome-validation benchmark setting.
+    market_regime_benchmark_symbol: str = "^NSEI"
+
     default_symbol: str = "INFY.NS"
     watchlist: str = "INFY.NS,TCS.NS,HCLTECH.NS,POWERGRID.NS,NTPC.NS,ITC.NS"
 

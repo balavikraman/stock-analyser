@@ -5,6 +5,7 @@ from typing import Any
 
 from ..config import get_settings
 from ..evidence import EvidenceRecord, actionable_gate, summarize_evidence, utc_now_iso
+from ..market_context import market_regime, relative_strength
 from ..providers.demo import DemoProvider
 from ..scoring import combine_scores, fundamental_score, governance_score, valuation_score
 from ..schemas import AnalysisReport, ScoreComponent
@@ -12,6 +13,7 @@ from ..technical import analyze_technicals
 from ..valuation import build_entry_plan, build_scenarios
 from .financials import enrich_quarterlies, forensic_checks
 from .news import classify_news, research_score
+from .event_risk import assess_event_risk
 from .official_evidence import fetch_official_evidence
 from .official_validation import assess_official_bundle, official_action_blocks
 
@@ -77,6 +79,17 @@ class StockAnalyzer:
         governance = governance_score(metrics)
         classified_news = classify_news(news)
         research = research_score(classified_news)
+        event_risk = assess_event_risk(classified_news)
+        benchmark_history: list[dict[str, Any]] = []
+        market = {"available": False, "regime": "UNKNOWN", "confidence": 0.0, "reason": "Benchmark data was not retrieved."}
+        strength = {"available": False, "confidence": 0.0, "reason": "Benchmark data was not retrieved."}
+        if provider.name != "demo":
+            try:
+                benchmark_history = provider.price_history(self.settings.market_regime_benchmark_symbol)
+                market = market_regime(benchmark_history)
+                strength = relative_strength(history, benchmark_history)
+            except Exception as exc:
+                source_errors.append(f"Market benchmark unavailable: {type(exc).__name__}")
         combined = combine_scores({"fundamental": fundamental, "valuation": valuation, "technical": technical, "governance": governance, "research": research})
         scenarios = build_scenarios(metrics, fundamental.get("growth", {}))
         entry = build_entry_plan(metrics.get("price"), technical, scenarios, combined["confidence"])
@@ -95,6 +108,13 @@ class StockAnalyzer:
         official_blocks = official_action_blocks(official_assessment, required=self.settings.require_official_evidence and provider.name != "demo")
         if official_blocks:
             gate = {"actionable": False, "reasons": list(dict.fromkeys(list(gate["reasons"]) + official_blocks))}
+        context_blocks = []
+        if market.get("regime") == "RISK_OFF":
+            context_blocks.append("broad market is risk-off; new entry ranges are withheld")
+        if event_risk["level"] == "HIGH":
+            context_blocks.append("potentially material event risk requires official verification before acting")
+        if context_blocks:
+            gate = {"actionable": False, "reasons": list(dict.fromkeys(list(gate["reasons"]) + context_blocks))}
 
         verdict, summary = self._verdict(combined["score"], combined["confidence"], valuation.get("score"), technical.get("score"))
         if not gate["actionable"]:
@@ -160,6 +180,9 @@ class StockAnalyzer:
                 "official_evidence_required": self.settings.require_official_evidence,
                 "actionable": gate["actionable"],
                 "action_block_reasons": gate["reasons"],
+                "market_regime": market,
+                "relative_strength": strength,
+                "event_risk": event_risk,
                 "strict_mode": self.settings.production_like,
             },
             disclaimers=[
