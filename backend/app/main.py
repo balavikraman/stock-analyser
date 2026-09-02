@@ -37,7 +37,8 @@ from .services.research_alerts import alert_status, build_research_alert
 from .services.metals import METALS, analyse_metal
 
 settings = get_settings()
-app = FastAPI(title="Stock Analyzer", version="0.6.1", docs_url="/api/docs")
+APP_VERSION = "0.9.0"
+app = FastAPI(title="Stock Analyzer", version=APP_VERSION, docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -62,7 +63,7 @@ def home() -> str:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.6.1", "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured(), "prospective_validation": True, "validation_runner": True}
+    return {"status": "ok", "version": APP_VERSION, "provider": settings.data_provider, "official_evidence_enabled": settings.official_evidence_enabled, "require_official_evidence": settings.require_official_evidence, "database": "postgresql" if settings.effective_database_url.startswith("postgres") else "sqlite-fallback", "zerodha_configured": ZerodhaReadOnly().configured(), "prospective_validation": True, "validation_runner": True}
 
 
 @app.get("/api/analyze/{symbol}")
