@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     telegram_chat_id: str = ""
     telegram_alerts_enabled: bool = False
     telegram_min_actionable_confidence: float = 0.70
+    official_event_review_days: int = 7
 
     default_symbol: str = "INFY.NS"
     watchlist: str = "INFY.NS,TCS.NS,HCLTECH.NS,POWERGRID.NS,NTPC.NS,ITC.NS"
