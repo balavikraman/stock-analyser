@@ -15,6 +15,7 @@ from .financials import enrich_quarterlies, forensic_checks
 from .news import classify_news, research_score
 from .event_risk import assess_event_risk
 from .official_evidence import fetch_official_evidence
+from .official_events import assess_official_events
 from .official_validation import assess_official_bundle, official_action_blocks
 
 
@@ -70,6 +71,7 @@ class StockAnalyzer:
             official_bundle = fetch_official_evidence(symbol)
             official_assessment = assess_official_bundle(official_bundle, metrics)
             source_errors.extend([f"Official evidence: {error}" for error in official_bundle.get("errors", [])])
+        official_events = assess_official_events(official_bundle or {}, self.settings.official_event_review_days)
 
         forensic = forensic_checks(annuals, metrics)
         technical = analyze_technicals(history)
@@ -113,6 +115,8 @@ class StockAnalyzer:
             context_blocks.append("broad market is risk-off; new entry ranges are withheld")
         if event_risk["level"] == "HIGH":
             context_blocks.append("potentially material event risk requires official verification before acting")
+        if official_events["review_required"]:
+            context_blocks.append("recent official governance-risk filing requires manual review before acting")
         if context_blocks:
             gate = {"actionable": False, "reasons": list(dict.fromkeys(list(gate["reasons"]) + context_blocks))}
 
@@ -183,6 +187,7 @@ class StockAnalyzer:
                 "market_regime": market,
                 "relative_strength": strength,
                 "event_risk": event_risk,
+                "official_events": official_events,
                 "strict_mode": self.settings.production_like,
             },
             disclaimers=[
