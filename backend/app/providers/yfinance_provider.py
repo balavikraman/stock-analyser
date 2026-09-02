@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from copy import deepcopy
+from time import sleep
 from typing import Any
 
 import pandas as pd
@@ -34,6 +36,8 @@ def _statement_rows(frame: pd.DataFrame, quarterly: bool = False) -> list[dict[s
 
 class YFinanceProvider(MarketDataProvider):
     name = "yfinance"
+    _price_cache: dict[tuple[str, str], tuple[datetime, list[dict[str, Any]]]] = {}
+    _cache_ttl_seconds = 900
 
     def company_snapshot(self, symbol: str) -> dict[str, Any]:
         info = yf.Ticker(symbol).info or {}
@@ -41,10 +45,29 @@ class YFinanceProvider(MarketDataProvider):
         return {"symbol": symbol.upper(), "company_name": info.get("longName") or info.get("shortName") or symbol, "website": info.get("website"), "sector": info.get("sector"), "industry": info.get("industry"), "currency": info.get("currency") or "INR", "price": _num(info.get("currentPrice") or info.get("regularMarketPrice")), "market_cap": _num(info.get("marketCap")), "pe": _num(info.get("trailingPE")), "forward_pe": _num(info.get("forwardPE")), "pb": _num(info.get("priceToBook")), "roe": roe * 100 if roe is not None else None, "roce": None, "debt_to_equity": de / 100 if de is not None else None, "interest_coverage": None, "operating_margin": om * 100 if om is not None else None, "net_margin": nm * 100 if nm is not None else None, "dividend_yield": dy * 100 if dy is not None else None, "book_value": _num(info.get("bookValue")), "eps": _num(info.get("trailingEps")), "peg": _num(info.get("pegRatio")), "fcf": _num(info.get("freeCashflow")), "operating_cashflow": _num(info.get("operatingCashflow")), "total_debt": _num(info.get("totalDebt")), "total_cash": _num(info.get("totalCash")), "promoter_pledge": None, "52w_high": _num(info.get("fiftyTwoWeekHigh")), "52w_low": _num(info.get("fiftyTwoWeekLow"))}
 
     def price_history(self, symbol: str, period: str = "5y") -> list[dict[str, Any]]:
-        df = yf.download(symbol, period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
+        key = (symbol.upper(), period)
+        cached = self._price_cache.get(key)
+        now = datetime.now(timezone.utc)
+        if cached and (now - cached[0]).total_seconds() < self._cache_ttl_seconds:
+            return deepcopy(cached[1])
+        last_error: Exception | None = None
+        df = pd.DataFrame()
+        for delay in (0, 1, 3):
+            if delay:
+                sleep(delay)
+            try:
+                df = yf.download(symbol, period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
+                if not df.empty:
+                    break
+            except Exception as exc:
+                last_error = exc
+        if df.empty and last_error:
+            raise last_error
         if df.empty: return []
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-        return [{"date": pd.Timestamp(i).date().isoformat(), "open": _num(r.get("Open")), "high": _num(r.get("High")), "low": _num(r.get("Low")), "close": _num(r.get("Close")), "volume": _num(r.get("Volume"))} for i, r in df.dropna(subset=["Close"]).iterrows()]
+        rows = [{"date": pd.Timestamp(i).date().isoformat(), "open": _num(r.get("Open")), "high": _num(r.get("High")), "low": _num(r.get("Low")), "close": _num(r.get("Close")), "volume": _num(r.get("Volume"))} for i, r in df.dropna(subset=["Close"]).iterrows()]
+        self._price_cache[key] = (now, rows)
+        return deepcopy(rows)
 
     def annual_financials(self, symbol: str) -> list[dict[str, Any]]:
         t = yf.Ticker(symbol); rows = _statement_rows(t.financials, False); cash = t.cashflow; balance = t.balance_sheet
