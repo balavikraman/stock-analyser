@@ -34,6 +34,7 @@ from .services.validation import (
 )
 from .services.validation_runner import execute_validation_run, validation_runner_status
 from .services.research_alerts import alert_status, build_research_alert
+from .services.metals import METALS, analyse_metal
 
 settings = get_settings()
 app = FastAPI(title="Stock Analyzer", version="0.6.1", docs_url="/api/docs")
@@ -76,6 +77,18 @@ def analyze(symbol: str, db: Session = Depends(db_session)):
     predictions = record_analysis_predictions(db, snap.id, report_payload)
     payload = dict(report_payload); payload["snapshot_id"] = snap.id; payload["prediction_ids"] = {row.strategy: row.id for row in predictions}
     return payload
+
+
+@app.get("/api/metals/{metal}")
+def analyse_metals(metal: str):
+    item = METALS.get(metal.lower())
+    if not item:
+        raise HTTPException(status_code=400, detail="metal must be gold or silver")
+    try:
+        history = StockAnalyzer()._provider().price_history(item["symbol"], period="1y")
+    except Exception as exc:
+        return analyse_metal(metal, []) | {"source_error": f"Live commodity source unavailable: {type(exc).__name__}. Retry later; no demo data was used."}
+    return analyse_metal(metal, history)
 
 
 @app.get("/api/sources")
