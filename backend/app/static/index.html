@@ -11,6 +11,7 @@
     <aside class="sidebar">
       <div class="brand"><div class="brand-mark">SA</div><div><strong>Stock Analyzer</strong><span>Local investment intelligence</span></div></div>
       <nav>
+        <button class="nav" data-view="dashboard">◉ <span>Dashboard</span></button>
         <button class="nav active" data-view="analysis">◫ <span>Analyze</span></button>
         <button class="nav" data-view="portfolio">◆ <span>Portfolio</span></button>
         <button class="nav" data-view="opportunities">◎ <span>Opportunities</span></button>
@@ -23,6 +24,7 @@
     <main>
       <header class="topbar"><div><h1 id="pageTitle">Deep Stock Analysis</h1><p id="pageSubtitle">Fundamentals, valuation, timing, news and position management in one report.</p></div><div class="top-actions"><button class="ghost" id="zerodhaBtn">Connect Zerodha</button></div></header>
 
+      <section id="dashboardView" class="view"><div class="card"><div class="section-head"><div><h3>Today at a glance</h3><p>Start here. These are guardrails and research prompts, not trade instructions.</p></div><button id="refreshDashboardBtn">Refresh</button></div><div id="dashboardContent" class="empty-state">Loading dashboard…</div></div></section>
       <section id="analysisView" class="view active">
         <div class="search-card"><div><label for="symbolInput">NSE symbol</label><div class="search-row"><input id="symbolInput" value="INFY.NS" placeholder="e.g. INFY.NS" /><button id="analyzeBtn">Analyze stock</button></div><p class="hint">Use <strong>.NS</strong> for NSE symbols in live mode, for example TCS.NS or HDFCBANK.NS.</p></div><div class="mode-pill" id="modePill">DATA MODE</div></div>
         <div id="loading" class="loading hidden"><div class="spinner"></div><div><strong>Building report</strong><span>Checking business quality, valuation, price structure and current signals…</span></div></div>
