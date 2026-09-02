@@ -84,6 +84,11 @@ def _input_snapshot(report: dict[str, Any], snapshot_id: int) -> dict[str, Any]:
         "evidence": quality.get("evidence") or {},
         "evidence_summary": quality.get("evidence_summary") or {},
         "official_validation": quality.get("official_validation") or {},
+        # Point-in-time context: later validation must not substitute today's
+        # regime or relative strength for what was known at signal creation.
+        "market_regime": quality.get("market_regime") or {},
+        "relative_strength": quality.get("relative_strength") or {},
+        "official_events": quality.get("official_events") or {},
         "action_block_reasons": quality.get("action_block_reasons") or [],
     }
 
@@ -359,6 +364,13 @@ def _aggregate(rows: list[tuple[PredictionRecord, PredictionOutcome]]) -> dict[s
     }
 
 
+def _context_bucket(prediction: PredictionRecord, key: str, fallback: str = "UNKNOWN") -> str:
+    snapshot = prediction.input_snapshot or {}
+    context = snapshot.get(key) or {}
+    value = context.get("regime") if key == "market_regime" else context.get("label")
+    return str(value or fallback)
+
+
 def validation_metrics(
     db: Session,
     *,
@@ -384,8 +396,12 @@ def validation_metrics(
     prediction_by_id = {row.id: row for row in predictions}
     complete_rows = [(prediction_by_id[row.prediction_id], row) for row in outcomes if row.status == "complete"]
     grouped: dict[int, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
+    regimes: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
+    strengths: dict[str, list[tuple[PredictionRecord, PredictionOutcome]]] = defaultdict(list)
     for pair in complete_rows:
         grouped[pair[1].horizon_days].append(pair)
+        regimes[_context_bucket(pair[0], "market_regime")].append(pair)
+        strengths[_context_bucket(pair[0], "relative_strength")].append(pair)
     return {
         "filters": {"strategy": strategy, "model_version": model_version, "symbol": symbol.upper() if symbol else None, "eligible_only": eligible_only},
         "prediction_count": len(predictions),
@@ -394,6 +410,8 @@ def validation_metrics(
         "pending_outcomes": sum(1 for row in outcomes if row.status != "complete"),
         "overall": _aggregate(complete_rows),
         "by_horizon": {str(days): _aggregate(rows) for days, rows in sorted(grouped.items())},
+        "by_market_regime": {key: _aggregate(rows) for key, rows in sorted(regimes.items())},
+        "by_relative_strength": {key: _aggregate(rows) for key, rows in sorted(strengths.items())},
         "probability_note": "model_probability remains null until prospective outcomes support calibration",
         "success_definition": {"swing": "net return after estimated costs is positive", "long_term": "net return exceeds the configured benchmark"},
     }
