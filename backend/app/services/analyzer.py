@@ -31,6 +31,19 @@ class StockAnalyzer:
         from ..providers.yfinance_provider import YFinanceProvider
         return YFinanceProvider()
 
+    def _blocked_report(self, symbol: str, error: Exception) -> AnalysisReport:
+        reason = f"Live market data unavailable ({type(error).__name__}). Retry later; no demo data was used."
+        scores = {key: ScoreComponent(score=None, confidence=0.0, label=label, explanation="Unavailable because live market data could not be verified.") for key, label in {
+            "fundamental": "Business & financial strength", "valuation": "Valuation", "technical": "Entry timing", "governance": "Governance", "research": "Current news & external context"}.items()}
+        return AnalysisReport(symbol=symbol, company_name=symbol, as_of=datetime.now(timezone.utc), scores=scores,
+            overall_score=None, overall_confidence=0.0, verdict="BLOCKED — LIVE DATA UNAVAILABLE", action_summary=reason,
+            metrics={"symbol": symbol}, annuals=[], quarterlies=[], technicals={}, price_history=[],
+            entry_plan={"status": "BLOCKED — LIVE DATA UNAVAILABLE", "actionable": False, "block_reasons": [reason], "reason": reason},
+            scenarios={"reason": reason}, news=[], risks=[reason], catalysts=[],
+            data_quality={"provider": "unavailable", "live_data": False, "actionable": False, "action_block_reasons": [reason], "source_warnings": [reason],
+                "source_status": [{"source": "Live market-price provider", "status": "unavailable", "missing": ["latest price", "daily candles", "volume", "benchmark context"], "message": reason, "next_step": "Retry later. The system will not use demo data for a real stock."}]},
+            disclaimers=["Decision-support tool; no entry levels are shown without verified live data."])
+
     def analyze(self, symbol: str) -> AnalysisReport:
         symbol = symbol.strip().upper()
         if not symbol:
@@ -44,7 +57,7 @@ class StockAnalyzer:
             quarterlies = enrich_quarterlies(provider.quarterly_financials(symbol))
             news = provider.news(symbol, metrics.get("company_name") or symbol)
         except Exception as exc:
-            if self.settings.data_provider.lower() == "auto" and not self.settings.production_like:
+            if self.settings.data_provider.lower() == "auto" and not self.settings.production_like and self.settings.allow_demo_fallback_for_real_symbols:
                 provider = DemoProvider()
                 source_errors.append(f"Live provider failed: {type(exc).__name__}. Demo fallback used for testing only.")
                 metrics = provider.company_snapshot(symbol)
@@ -53,7 +66,7 @@ class StockAnalyzer:
                 quarterlies = enrich_quarterlies(provider.quarterly_financials(symbol))
                 news = provider.news(symbol, metrics.get("company_name") or symbol)
             else:
-                raise
+                return self._blocked_report(symbol, exc)
 
         if history and not metrics.get("price"):
             metrics["price"] = history[-1].get("close")
@@ -190,6 +203,7 @@ class StockAnalyzer:
             data_quality={
                 "provider": provider.name,
                 "live_data": provider.name != "demo",
+                "source_status": [{"source": provider.name, "status": "available", "missing": [], "message": "Price, history, financial and news requests completed.", "next_step": "Review freshness and official-evidence warnings below."}],
                 "fundamental_confidence": fundamental.get("confidence"),
                 "valuation_confidence": valuation.get("confidence"),
                 "technical_confidence": technical.get("confidence"),
