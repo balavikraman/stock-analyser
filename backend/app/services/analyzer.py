@@ -19,6 +19,7 @@ from .official_evidence import fetch_official_evidence
 from .official_events import assess_official_events
 from .sector_checks import assess_sector_risks
 from .official_validation import assess_official_bundle, official_action_blocks
+from .tomorrow_outlook import build_tomorrow_outlook
 
 
 class StockAnalyzer:
@@ -39,6 +40,7 @@ class StockAnalyzer:
             overall_score=None, overall_confidence=0.0, verdict="BLOCKED — LIVE DATA UNAVAILABLE", action_summary=reason,
             metrics={"symbol": symbol}, annuals=[], quarterlies=[], technicals={}, price_history=[],
             entry_plan={"status": "BLOCKED — LIVE DATA UNAVAILABLE", "actionable": False, "block_reasons": [reason], "reason": reason},
+            tomorrow_outlook={"status": "UNAVAILABLE", "plain_meaning": reason, "actionable": False, "probability": None},
             scenarios={"reason": reason}, news=[], risks=[reason], catalysts=[],
             data_quality={"provider": "unavailable", "live_data": False, "actionable": False, "action_block_reasons": [reason], "source_warnings": [reason],
                 "source_status": [{"source": "Live market-price provider", "status": "unavailable", "missing": ["latest price", "daily candles", "volume", "benchmark context"], "message": reason, "next_step": "Retry later. The system will not use demo data for a real stock."}]},
@@ -165,6 +167,7 @@ class StockAnalyzer:
         else:
             entry = dict(entry)
             entry["actionable"] = True
+        tomorrow_outlook = build_tomorrow_outlook(metrics.get("price"), technical, market, breadth, strength, gate["actionable"])
 
         score_models = {
             "fundamental": ScoreComponent(score=fundamental.get("score"), confidence=fundamental.get("confidence", 0), label="Business & financial strength", explanation="Profitability, growth, leverage and cash conversion."),
@@ -196,6 +199,7 @@ class StockAnalyzer:
             technicals=technical,
             price_history=history[-500:],
             entry_plan=entry,
+            tomorrow_outlook=tomorrow_outlook,
             scenarios=scenarios,
             news=classified_news,
             risks=risks,
