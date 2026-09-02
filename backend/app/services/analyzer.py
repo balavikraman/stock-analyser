@@ -6,6 +6,7 @@ from typing import Any
 from ..config import get_settings
 from ..evidence import EvidenceRecord, actionable_gate, summarize_evidence, utc_now_iso
 from ..market_context import market_regime, relative_strength
+from ..market_breadth import assess_market_breadth
 from ..providers.demo import DemoProvider
 from ..scoring import combine_scores, fundamental_score, governance_score, valuation_score
 from ..schemas import AnalysisReport, ScoreComponent
@@ -16,6 +17,7 @@ from .news import classify_news, research_score
 from .event_risk import assess_event_risk
 from .official_evidence import fetch_official_evidence
 from .official_events import assess_official_events
+from .sector_checks import assess_sector_risks
 from .official_validation import assess_official_bundle, official_action_blocks
 
 
@@ -70,10 +72,16 @@ class StockAnalyzer:
         if provider.name != "demo" and self.settings.official_evidence_enabled:
             official_bundle = fetch_official_evidence(symbol)
             official_assessment = assess_official_bundle(official_bundle, metrics)
+            # Prefer an explicitly labelled official pledge fact over an absent
+            # normalized-provider field; never infer it from an unlabeled table.
+            official_pledge = (official_assessment.get("facts") or {}).get("promoter_pledge", {}).get("value")
+            if isinstance(official_pledge, (int, float)):
+                metrics["promoter_pledge"] = float(official_pledge)
             source_errors.extend([f"Official evidence: {error}" for error in official_bundle.get("errors", [])])
         official_events = assess_official_events(official_bundle or {}, self.settings.official_event_review_days)
 
-        forensic = forensic_checks(annuals, metrics)
+        forensic = forensic_checks(annuals, metrics, metrics.get("sector"))
+        sector_risk = assess_sector_risks(metrics.get("sector"), annuals, metrics)
         technical = analyze_technicals(history)
         fundamental = fundamental_score(metrics, annuals, metrics.get("sector"))
         metrics.update(fundamental.get("growth", {}))
@@ -85,11 +93,14 @@ class StockAnalyzer:
         benchmark_history: list[dict[str, Any]] = []
         market = {"available": False, "regime": "UNKNOWN", "confidence": 0.0, "reason": "Benchmark data was not retrieved."}
         strength = {"available": False, "confidence": 0.0, "reason": "Benchmark data was not retrieved."}
+        breadth = {"available": False, "reason": "Watchlist breadth was not retrieved."}
         if provider.name != "demo":
             try:
                 benchmark_history = provider.price_history(self.settings.market_regime_benchmark_symbol)
                 market = market_regime(benchmark_history)
                 strength = relative_strength(history, benchmark_history)
+                breadth_histories = {s: provider.price_history(s) for s in self.settings.watchlist_symbols[:20]}
+                breadth = assess_market_breadth(breadth_histories, self.settings.market_breadth_minimum_symbols)
             except Exception as exc:
                 source_errors.append(f"Market benchmark unavailable: {type(exc).__name__}")
         combined = combine_scores({"fundamental": fundamental, "valuation": valuation, "technical": technical, "governance": governance, "research": research})
@@ -111,8 +122,16 @@ class StockAnalyzer:
         if official_blocks:
             gate = {"actionable": False, "reasons": list(dict.fromkeys(list(gate["reasons"]) + official_blocks))}
         context_blocks = []
+        if any(flag.get("severity") == "high" for flag in forensic["flags"]):
+            context_blocks.append("high-severity financial-forensic warning requires manual review before acting")
+        if any(flag.get("severity") == "high" for flag in sector_risk["flags"]):
+            context_blocks.append("high-severity sector-specific risk requires manual review before acting")
         if market.get("regime") == "RISK_OFF":
             context_blocks.append("broad market is risk-off; new entry ranges are withheld")
+        if technical.get("liquidity") == "THIN":
+            context_blocks.append("average traded value is thin; entry ranges are withheld because exit liquidity may be poor")
+        if breadth.get("state") == "NARROW":
+            context_blocks.append("watchlist breadth is narrow; broad participation is weak and entry ranges are withheld")
         if event_risk["level"] == "HIGH":
             context_blocks.append("potentially material event risk requires official verification before acting")
         if official_events["review_required"]:
@@ -142,7 +161,7 @@ class StockAnalyzer:
             "research": ScoreComponent(score=research.get("score"), confidence=research.get("confidence", 0), label="Current news & external context", explanation=research.get("explanation", "")),
         }
         mismatch_risks = [item.get("message") for item in official_assessment.get("mismatches", []) if item.get("message")]
-        risks = self._risks(metrics, technical, classified_news, source_errors) + mismatch_risks + [f["message"] for f in forensic["flags"] if f["severity"] in ("high", "medium")]
+        risks = self._risks(metrics, technical, classified_news, source_errors) + mismatch_risks + [f["message"] for f in forensic["flags"] if f["severity"] in ("high", "medium")] + [f["message"] for f in sector_risk["flags"]]
         risks = list(dict.fromkeys(risks))[:10]
 
         return AnalysisReport(
@@ -178,6 +197,7 @@ class StockAnalyzer:
                 "source_warnings": source_errors,
                 "forensic_score": forensic["score"],
                 "forensic_flags": forensic["flags"],
+                "sector_risk": sector_risk,
                 "evidence": evidence,
                 "evidence_summary": evidence_summary,
                 "official_validation": official_assessment,
@@ -186,6 +206,7 @@ class StockAnalyzer:
                 "action_block_reasons": gate["reasons"],
                 "market_regime": market,
                 "relative_strength": strength,
+                "market_breadth": breadth,
                 "event_risk": event_risk,
                 "official_events": official_events,
                 "strict_mode": self.settings.production_like,
