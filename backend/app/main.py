@@ -13,7 +13,8 @@ from .db import SessionLocal, init_db
 from .models import AnalysisSnapshot, JournalEntry, PredictionOutcome, PredictionRecord
 from .portfolio import summarize_holdings
 from .providers.zerodha_provider import ZerodhaReadOnly
-from .schemas import JournalCreate
+from .schemas import EquityDeliveryCalculationRequest, JournalCreate
+from .services.equity_delivery_calculator import calculate_equity_delivery
 from .services.analyzer import StockAnalyzer
 from .services.bse_public import discover_bse_filings
 from .services.company_ir import discover_ir_documents
@@ -38,7 +39,7 @@ from .services.metals import METALS, analyse_metal
 from .services.research_runner import execute_research_run, research_runner_status
 
 settings = get_settings()
-APP_VERSION = "0.10.4"
+APP_VERSION = "0.10.5"
 app = FastAPI(title="Stock Analyzer", version=APP_VERSION, docs_url="/api/docs")
 STATIC = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -96,6 +97,15 @@ def analyse_metals(metal: str):
 @app.get("/api/sources")
 def sources(sector: str | None = None, include_planned: bool = True):
     return registry_payload(sector, include_planned=include_planned)
+
+
+@app.post("/api/calculators/equity-delivery")
+def equity_delivery_calculator(request: EquityDeliveryCalculationRequest):
+    """Estimate Zerodha-style retail CNC profit/loss without placing an order."""
+    try:
+        return calculate_equity_delivery(**request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/company-ir/{symbol}")
