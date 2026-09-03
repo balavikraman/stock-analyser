@@ -23,6 +23,14 @@ class JournalCreate(BaseModel):
     snapshot_id: int | None = None
 
 
+class EquityDeliveryCalculationRequest(BaseModel):
+    buy_price: float = Field(gt=0)
+    sell_price: float = Field(gt=0)
+    quantity: int = Field(gt=0)
+    exchange: str = "NSE"
+    include_dp_charge: bool = True
+
+
 class AnalysisReport(BaseModel):
     symbol: str
     company_name: str
