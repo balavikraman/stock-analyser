@@ -15,6 +15,7 @@
         <button class="nav" data-view="dashboard">◉ <span>Dashboard</span></button>
         <button class="nav active" data-view="analysis">◫ <span>Analyze</span></button>
         <button class="nav" data-view="portfolio">◆ <span>Portfolio</span></button>
+        <button class="nav" data-view="calculator">▣ <span>Profit calculator</span></button>
         <button class="nav" data-view="opportunities">◎ <span>Opportunities</span></button>
         <button class="nav" data-view="journal">▤ <span>Journal</span></button>
         <button class="nav" data-view="validation">◌ <span>Validation</span></button>
@@ -47,6 +48,26 @@
       </section>
 
       <section id="portfolioView" class="view"><div class="card"><div class="section-head"><div><h3>Zerodha portfolio</h3><p>Read-only by design. No order-placement endpoints exist in this app.</p></div><button id="refreshPortfolioBtn">Refresh</button></div><div id="portfolioContent" class="empty-state">Connect Zerodha to load holdings, average prices and allocation.</div></div></section>
+      <section id="calculatorView" class="view">
+        <div class="calculator-layout">
+          <article class="card calculator-form-card">
+            <div class="section-head"><div><h3>Equity Delivery Profit Calculator</h3><p>For Zerodha CNC delivery trades only. It does not place an order.</p></div><span class="tag">Estimate</span></div>
+            <form id="deliveryCalculatorForm" class="calculator-form">
+              <label>Buy price <span>₹ per share</span><input id="deliveryBuyPrice" type="number" min="0.01" step="0.01" value="100" required /></label>
+              <label>Sell price <span>₹ per share</span><input id="deliverySellPrice" type="number" min="0.01" step="0.01" value="110" required /></label>
+              <label>Quantity <span>whole shares</span><input id="deliveryQuantity" type="number" min="1" step="1" value="10" required /></label>
+              <label>Exchange<select id="deliveryExchange"><option value="NSE">NSE</option><option value="BSE">BSE</option></select></label>
+              <label class="check-row"><input id="deliveryDpCharge" type="checkbox" checked /> Include Zerodha DP charge on sale <span>₹15.34 once per scrip sale</span></label>
+              <button type="submit">Calculate net result</button>
+            </form>
+          </article>
+          <article class="card calculator-result-card">
+            <div class="section-head"><div><h3>Your result</h3><p>Enter a buy, sell, and quantity to see the full cost estimate.</p></div></div>
+            <div id="deliveryCalculatorResult" class="empty-state compact">No calculation yet.</div>
+          </article>
+        </div>
+        <details class="card calculator-note" open><summary><strong>What is included?</strong> · Every stated charge is listed separately</summary><div class="calculator-notes"><p><strong>₹0 brokerage:</strong> Zerodha's published retail equity-delivery brokerage.</p><p><strong>DP charge:</strong> charged once when delivery shares of one scrip are sold, not once per share.</p><p><strong>Important:</strong> this is a transparent estimate, not a contract note. Charges and rounding can change.</p></div></details>
+      </section>
       <section id="opportunitiesView" class="view"><div class="card"><div class="section-head"><div><h3>Opportunity scanner</h3><p><strong>Actionable today</strong> means every current evidence and risk gate passed. Research-only rows are not buy signals.</p></div><button id="scanBtn">Run scanner</button></div><div id="scanContent" class="empty-state">Scanner has not been run yet.</div></div></section>
       <section id="journalView" class="view"><div class="card"><div class="section-head"><div><h3>Investment journal</h3><p>Stored locally so we can compare original thesis with future reality.</p></div><button id="refreshJournalBtn">Refresh</button></div><div id="journalContent" class="empty-state">No journal entries yet.</div></div></section>
       <section id="validationView" class="view"><div class="card"><div class="section-head"><div><h3>Prediction validation</h3><p>Measures saved recommendations against later market outcomes. Results stay research-only until enough outcomes exist.</p></div><button id="refreshValidationBtn">Refresh</button></div><div id="validationStatus" class="empty-state">Loading validation status…</div><div id="validationSummary" class="score-grid validation-grid"></div><div id="validationMetrics" class="two-col"></div><div class="table-wrap"><table id="validationRunsTable"></table></div></div></section>
